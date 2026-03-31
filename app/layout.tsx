@@ -3,6 +3,7 @@ import './globals.css';
 import { AuthProvider } from '@/components/providers/AuthProvider';
 import { SocketProvider } from '@/components/providers/SocketProvider';
 import { Toaster } from 'react-hot-toast';
+import ChatWidget from '@/components/ui/ChatWidget';
 
 export const metadata: Metadata = {
   title: 'MediQueue — Hospital Queue Management',
@@ -25,6 +26,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <AuthProvider>
           <SocketProvider>
             {children}
+            <ChatWidget />
             <Toaster
               position="top-right"
               toastOptions={{
