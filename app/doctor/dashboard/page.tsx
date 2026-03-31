@@ -9,6 +9,7 @@ import { useSocket } from '@/components/providers/SocketProvider';
 import { calculateWaitTime, formatWaitTime } from '@/lib/wait-time';
 import toast from 'react-hot-toast';
 import { format } from 'date-fns';
+import { Megaphone, Stethoscope, CheckCircle2, Timer, Hourglass, Pill, FileText, Clock, MousePointerClick, Coffee } from 'lucide-react';
 
 interface Token {
   _id: string;
@@ -29,7 +30,9 @@ interface Consultation {
   patientName: string;
   diagnosis: string;
   prescription: string;
+  notes?: string;
   date: string;
+  duration?: number;
 }
 
 export default function DoctorDashboard() {
@@ -145,35 +148,28 @@ export default function DoctorDashboard() {
             className="animate-pulse-glow"
             disabled={waiting.length === 0}
             style={{
-              width: '100%',
-              padding: '18px',
+              width: '100%', padding: '18px',
               background: waiting.length > 0 ? 'linear-gradient(135deg, #6366F1, #8B5CF6)' : 'rgba(255,255,255,0.05)',
-              border: 'none',
-              borderRadius: 16,
-              color: 'white',
-              fontSize: 18,
-              fontWeight: 700,
+              border: 'none', borderRadius: 16, color: 'white', fontSize: 18, fontWeight: 700,
               cursor: waiting.length > 0 ? 'pointer' : 'not-allowed',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              gap: 10,
+              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10,
               transition: 'all 0.2s',
               boxShadow: waiting.length > 0 ? '0 8px 32px rgba(99,102,241,0.4)' : 'none',
             }}
           >
-            <span style={{ fontSize: 24 }}>📢</span>
+            <Megaphone size={22} />
             Call Next Patient
           </button>
 
           {/* Stats row */}
           <div style={{ display: 'flex', gap: 8 }}>
             {[
-              { label: 'Waiting', val: waiting.length, color: '#F59E0B' },
-              { label: 'Done', val: queue.filter((t) => t.status === 'done').length, color: '#22C55E' },
-              { label: 'Avg', val: `${avgDuration}m`, color: '#6366F1' },
-            ].map((s) => (
+              { label: 'Waiting', val: waiting.length, color: '#F59E0B', Icon: Hourglass },
+              { label: 'Done',    val: queue.filter(t => t.status === 'done').length, color: '#22C55E', Icon: CheckCircle2 },
+              { label: 'Avg',     val: `${avgDuration}m`, color: '#6366F1', Icon: Timer },
+            ].map(s => (
               <div key={s.label} className="glass-card" style={{ flex: 1, padding: '12px', textAlign: 'center' }}>
+                <s.Icon size={16} color={s.color} style={{ margin: '0 auto 4px' }} />
                 <div style={{ fontSize: 22, fontWeight: 700, color: s.color }}>{s.val}</div>
                 <div style={{ fontSize: 11, color: '#6B7280' }}>{s.label}</div>
               </div>
@@ -186,7 +182,7 @@ export default function DoctorDashboard() {
               <div style={{ textAlign: 'center', color: '#6B7280', padding: 32 }}>Loading...</div>
             ) : queue.length === 0 ? (
               <div style={{ textAlign: 'center', color: '#6B7280', padding: 40 }}>
-                <div style={{ fontSize: 36, marginBottom: 10 }}>☕</div>
+                <Coffee size={36} strokeWidth={1.3} style={{ margin: '0 auto 10px' }} />
                 <p>Queue is empty today</p>
               </div>
             ) : (
@@ -315,15 +311,24 @@ export default function DoctorDashboard() {
                 )}
 
                 {activeTab === 'history' && (
-                  <div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
                     {history.filter((h) => h.patientName === selected.patientName).length === 0 ? (
-                      <p style={{ color: '#6B7280' }}>No consultation history found.</p>
+                      <p style={{ color: '#6B7280' }}>No past consultations for this patient.</p>
                     ) : (
                       history.filter((h) => h.patientName === selected.patientName).map((c) => (
-                        <div key={c._id} className="glass-card" style={{ marginBottom: 12, padding: 16 }}>
-                          <div style={{ fontSize: 12, color: '#6B7280', marginBottom: 8 }}>{c.date}</div>
-                          <div style={{ fontSize: 14, fontWeight: 600, color: '#E5E7EB', marginBottom: 4 }}>Diagnosis: {c.diagnosis}</div>
-                          <div style={{ fontSize: 13, color: '#9CA3AF' }}>Rx: {c.prescription}</div>
+                        <div key={c._id} className="glass-card" style={{ padding: 16 }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
+                            <span style={{ fontSize: 12, color: '#6B7280' }}>{new Date(c.date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}</span>
+                            {c.duration && <span style={{ fontSize: 11, color: '#4B5563' }}>⏱ {c.duration}m</span>}
+                          </div>
+                          <div style={{ fontSize: 14, fontWeight: 600, color: '#E5E7EB', marginBottom: 6 }}>🩺 {c.diagnosis}</div>
+                          <div style={{ fontSize: 13, color: '#9CA3AF', marginBottom: c.notes ? 8 : 0 }}>💊 {c.prescription}</div>
+                          {c.notes && (
+                            <div style={{ background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.2)', borderRadius: 8, padding: '8px 12px', marginTop: 8 }}>
+                              <div style={{ fontSize: 10, fontWeight: 700, color: '#D97706', letterSpacing: '0.06em', marginBottom: 4 }}>YOUR NOTES</div>
+                              <div style={{ fontSize: 13, color: '#FCD34D' }}>📝 {c.notes}</div>
+                            </div>
+                          )}
                         </div>
                       ))
                     )}

@@ -10,30 +10,42 @@ export async function GET(req: NextRequest) {
     if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
     const { searchParams } = new URL(req.url);
-    const patientName = searchParams.get('patientName');
-    const doctorId = searchParams.get('doctorId');
+    const patientId    = searchParams.get('patientId');
+    const doctorIdParam = searchParams.get('doctorId');
 
-    const query: Record<string, unknown> = {};
+    let query: Record<string, unknown> = {};
 
     if (user.role === 'doctor') {
+      // Doctor sees all consultations they personally completed
       query.doctorId = user.id;
-    } else if (doctorId) {
-      query.doctorId = doctorId;
-    }
 
-    if (patientName) {
-      query.patientName = { $regex: patientName, $options: 'i' };
+    } else if (user.role === 'patient') {
+      // Patient sees their own AND all family members they booked for.
+      // bookedById is always the logged-in patient's account ID.
+      query = {
+        $or: [
+          { bookedById: user.id },  // includes self + family members
+          { patientId:  user.id },  // legacy records before bookedById was added
+        ],
+      };
+
+    } else {
+      // Reception — can filter by patientId or doctorId
+      if (patientId)     query.patientId = patientId;
+      if (doctorIdParam) query.doctorId  = doctorIdParam;
     }
 
     const consultations = await Consultation.find(query)
       .sort({ createdAt: -1 })
-      .limit(50)
+      .limit(100)
       .lean();
 
-    // Calculate average duration for wait time engine
-    const durations = consultations.map((c) => c.duration);
+    // Calculate average consultation duration for wait-time estimation
+    const durations = consultations.map((c) => c.duration).filter(Boolean);
     const avgDuration =
-      durations.length > 0 ? Math.round(durations.reduce((a, b) => a + b, 0) / durations.length) : 10;
+      durations.length > 0
+        ? Math.round(durations.reduce((a, b) => a + b, 0) / durations.length)
+        : 10;
 
     return NextResponse.json({ consultations, avgDuration });
   } catch (error) {

@@ -10,6 +10,7 @@ import { useSocket } from '@/components/providers/SocketProvider';
 import { calculateWaitTime, formatWaitTime } from '@/lib/wait-time';
 import toast from 'react-hot-toast';
 import { format } from 'date-fns';
+import { Ticket, Hourglass, Stethoscope, Timer, X, PhoneCall, CheckCircle, Plus } from 'lucide-react';
 
 interface Doctor {
   _id: string;
@@ -95,16 +96,16 @@ export default function ReceptionDashboard() {
     <DashboardLayout title="Reception Dashboard" subtitle="Manage OPD queue in real-time" requiredRole="reception">
       {/* Stats */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 16, marginBottom: 24 }}>
-        <StatCard title="Total Tokens Today" value={tokens.length} icon={<span>🎫</span>} color="#6366F1" />
-        <StatCard title="Waiting" value={waiting.length} icon={<span>⏳</span>} color="#F59E0B" />
-        <StatCard title="In Progress" value={inProgress.length} icon={<span>🩺</span>} color="#3B82F6" />
-        <StatCard title="Avg Wait Time" value={formatWaitTime(avgDuration)} icon={<span>⏱️</span>} color="#22C55E" />
+        <StatCard title="Total Tokens Today" value={tokens.length} icon={<Ticket size={20} />} color="#6366F1" />
+        <StatCard title="Waiting" value={waiting.length} icon={<Hourglass size={20} />} color="#F59E0B" />
+        <StatCard title="In Progress" value={inProgress.length} icon={<Stethoscope size={20} />} color="#3B82F6" />
+        <StatCard title="Avg Wait Time" value={formatWaitTime(avgDuration)} icon={<Timer size={20} />} color="#22C55E" />
       </div>
 
       {/* Actions */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
         <h2 style={{ fontSize: 18, fontWeight: 600, color: '#F9FAFB' }}>Queue — {format(new Date(), 'dd MMM yyyy')}</h2>
-        <Button onClick={() => setShowModal(true)}>+ Create Token</Button>
+        <Button onClick={() => setShowModal(true)} style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><Plus size={15} /> Create Token</Button>
       </div>
 
       {/* Queue Table */}
@@ -161,18 +162,18 @@ export default function ReceptionDashboard() {
                     <td>
                       <div style={{ display: 'flex', gap: 6 }}>
                         {t.status === 'waiting' && (
-                          <button className="btn-ghost" style={{ height: 30, padding: '0 10px', fontSize: 12 }} onClick={() => updateStatus(t._id, 'in-progress')}>
-                            Call
+                          <button className="btn-ghost" style={{ height: 30, padding: '0 10px', fontSize: 12, display: 'inline-flex', alignItems: 'center', gap: 4 }} onClick={() => updateStatus(t._id, 'in-progress')}>
+                            <PhoneCall size={12} /> Call
                           </button>
                         )}
                         {t.status === 'in-progress' && (
-                          <button className="btn-ghost" style={{ height: 30, padding: '0 10px', fontSize: 12, color: '#22C55E' }} onClick={() => updateStatus(t._id, 'done')}>
-                            Done
+                          <button className="btn-ghost" style={{ height: 30, padding: '0 10px', fontSize: 12, color: '#22C55E', display: 'inline-flex', alignItems: 'center', gap: 4 }} onClick={() => updateStatus(t._id, 'done')}>
+                            <CheckCircle size={12} /> Done
                           </button>
                         )}
                         {!['done', 'cancelled'].includes(t.status) && (
-                          <button className="btn-ghost" style={{ height: 30, padding: '0 10px', fontSize: 12, color: '#EF4444' }} onClick={() => updateStatus(t._id, 'cancelled')}>
-                            ✕
+                          <button className="btn-ghost" style={{ height: 30, padding: '0 10px', fontSize: 12, color: '#EF4444', display: 'inline-flex', alignItems: 'center', gap: 4 }} onClick={() => updateStatus(t._id, 'cancelled')}>
+                            <X size={12} />
                           </button>
                         )}
                       </div>

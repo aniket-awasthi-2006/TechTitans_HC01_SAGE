@@ -37,11 +37,14 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<Para
       // Create consultation record
       if (diagnosis && prescription) {
         await Consultation.create({
-          tokenId: token._id,
-          patientId: token.patientId,
-          doctorId: token.doctorId,
-          patientName: token.patientName,
-          doctorName: user.name,
+          tokenId:      token._id,
+          patientId:    token.patientId,          // undefined for family members — that's OK
+          bookedById:   token.bookedById || token.patientId,  // always set
+          doctorId:     token.doctorId,
+          patientName:  token.patientName,
+          doctorName:   user.name,
+          relationship: (token as { relationship?: string }).relationship || 'self',
+          patientGender:(token as { patientGender?: string }).patientGender,
           diagnosis,
           prescription,
           notes,

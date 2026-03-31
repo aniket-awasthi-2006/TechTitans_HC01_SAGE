@@ -4,6 +4,7 @@ import { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/components/providers/AuthProvider';
 import Link from 'next/link';
+import Image from 'next/image';
 
 const roles = [
   {
@@ -68,21 +69,8 @@ export default function LoginPortal() {
     >
       {/* Header */}
       <div style={{ textAlign: 'center', marginBottom: 56 }}>
-        <div
-          style={{
-            width: 72,
-            height: 72,
-            borderRadius: 20,
-            background: 'linear-gradient(135deg, #6366F1, #8B5CF6)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            fontSize: 36,
-            margin: '0 auto 20px',
-            boxShadow: '0 12px 40px rgba(99,102,241,0.4)',
-          }}
-        >
-          🏥
+        <div style={{ margin: '0 auto 20px', width: 96, height: 96 }}>
+          <Image src="/logo.png" alt="MediQueue Logo" width={96} height={96} style={{ borderRadius: 24, boxShadow: '0 12px 40px rgba(99,102,241,0.4)' }} />
         </div>
         <h1
           style={{

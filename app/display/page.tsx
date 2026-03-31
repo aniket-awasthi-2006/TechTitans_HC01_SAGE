@@ -4,6 +4,8 @@ import { useState, useEffect, useCallback } from 'react';
 import { io, Socket } from 'socket.io-client';
 import { formatWaitTime, calculateWaitTime } from '@/lib/wait-time';
 import { format } from 'date-fns';
+import Image from 'next/image';
+import { Wifi, WifiOff, Clock, Users, CheckCircle2, Timer, Stethoscope } from 'lucide-react';
 
 interface Token {
   _id: string;
@@ -21,14 +23,21 @@ export default function DisplayPanel() {
   const [avgDuration, setAvgDuration] = useState(10);
   const [currentTime, setCurrentTime] = useState('');
   const [currentDate, setCurrentDate] = useState('');
+  const [lastUpdated, setLastUpdated] = useState('');
 
   const fetchTokens = useCallback(async () => {
     try {
-      const res = await fetch('/api/tokens');
-      if (!res.ok) return;
+      const res = await fetch('/api/display');
+      if (!res.ok) {
+        console.error('[Display] API error:', res.status);
+        return;
+      }
       const data = await res.json();
       const allTokens: Token[] = data.tokens || [];
       setTokens(allTokens);
+      if (data.avgDuration) setAvgDuration(data.avgDuration);
+      setLastUpdated(new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
+
       const inProgress = allTokens.find((t) => t.status === 'in-progress');
       setCurrentToken((prev) => {
         if (inProgress && prev?._id !== inProgress._id) {
@@ -37,10 +46,12 @@ export default function DisplayPanel() {
         }
         return inProgress || null;
       });
-    } catch { /* silent */ }
+    } catch (err) {
+      console.error('[Display] fetch error:', err);
+    }
   }, []);
 
-  // Socket.io connection
+  // Socket.io — real-time updates
   useEffect(() => {
     const socket: Socket = io('', {
       path: '/api/socket',
@@ -49,337 +60,244 @@ export default function DisplayPanel() {
 
     socket.on('connect', () => setIsConnected(true));
     socket.on('disconnect', () => setIsConnected(false));
-
-    socket.on('token_updated', () => fetchTokens());
-    socket.on('queue_updated', () => fetchTokens());
-    socket.on('token_created', () => fetchTokens());
-    socket.on('doctor_called_next', () => fetchTokens());
-    socket.on('consultation_completed', () => fetchTokens());
+    socket.on('token_updated', fetchTokens);
+    socket.on('queue_updated', fetchTokens);
+    socket.on('token_created', fetchTokens);
+    socket.on('doctor_called_next', fetchTokens);
+    socket.on('consultation_completed', fetchTokens);
 
     return () => { socket.disconnect(); };
   }, [fetchTokens]);
 
-  // Initial fetch
-  useEffect(() => { fetchTokens(); }, [fetchTokens]);
+  // Initial fetch + polling fallback every 15s
+  useEffect(() => {
+    fetchTokens();
+    const poll = setInterval(fetchTokens, 15000);
+    return () => clearInterval(poll);
+  }, [fetchTokens]);
 
   // Clock
   useEffect(() => {
-    const updateTime = () => {
+    const update = () => {
       const now = new Date();
       setCurrentTime(now.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
       setCurrentDate(format(now, 'EEEE, dd MMMM yyyy'));
     };
-    updateTime();
-    const interval = setInterval(updateTime, 1000);
-    return () => clearInterval(interval);
+    update();
+    const iv = setInterval(update, 1000);
+    return () => clearInterval(iv);
   }, []);
 
   const waiting = tokens.filter((t) => t.status === 'waiting');
-  const nextTokens = waiting.slice(0, 5);
-  const totalWaiting = waiting.length;
+  const done    = tokens.filter((t) => t.status === 'done');
+  const nextTokens = waiting.slice(0, 6);
+
+  const doctorName = currentToken && typeof currentToken.doctorId === 'object'
+    ? currentToken.doctorId.name : 'Your Doctor';
 
   return (
-    <div
-      style={{
-        minHeight: '100vh',
-        width: '100vw',
-        background: 'radial-gradient(ellipse at 20% 30%, rgba(99,102,241,0.2) 0%, transparent 50%), radial-gradient(ellipse at 80% 70%, rgba(6,182,212,0.15) 0%, transparent 50%), #0B0F1A',
-        display: 'flex',
-        flexDirection: 'column',
-        overflow: 'hidden',
-        fontFamily: 'Inter, system-ui, sans-serif',
-      }}
-    >
-      {/* Header Bar */}
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          padding: '20px 48px',
-          borderBottom: '1px solid rgba(99,102,241,0.15)',
-          background: 'rgba(17,24,39,0.8)',
-          backdropFilter: 'blur(20px)',
-        }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-          <div
-            style={{
-              width: 48,
-              height: 48,
-              borderRadius: 14,
-              background: 'linear-gradient(135deg, #6366F1, #8B5CF6)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              fontSize: 24,
-              boxShadow: '0 4px 20px rgba(99,102,241,0.5)',
-            }}
-          >
-            🏥
-          </div>
+    <div style={{
+      minHeight: '100vh', width: '100vw',
+      background: 'radial-gradient(ellipse at 20% 30%, rgba(99,102,241,0.18) 0%, transparent 50%), radial-gradient(ellipse at 80% 70%, rgba(6,182,212,0.12) 0%, transparent 50%), #0B0F1A',
+      display: 'flex', flexDirection: 'column', overflow: 'hidden',
+      fontFamily: 'Inter, system-ui, sans-serif',
+    }}>
+
+      {/* ── Header Bar ── */}
+      <div style={{
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        padding: '16px 40px',
+        borderBottom: '1px solid rgba(99,102,241,0.15)',
+        background: 'rgba(17,24,39,0.85)', backdropFilter: 'blur(20px)',
+        flexShrink: 0,
+      }}>
+        {/* Logo */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+          <Image src="/logo.png" alt="MediQueue" width={64} height={64} style={{ borderRadius: 18, boxShadow: '0 4px 20px rgba(99,102,241,0.5)' }} />
           <div>
-            <div style={{ fontSize: 22, fontWeight: 800, color: '#F9FAFB' }}>MediQueue</div>
-            <div style={{ fontSize: 13, color: '#6B7280' }}>Real-Time Token Display</div>
+            <div style={{ fontSize: 24, fontWeight: 800, color: '#F9FAFB' }}>MediQueue</div>
+            <div style={{ fontSize: 13, color: '#6B7280' }}>Real-Time OPD Queue Display</div>
           </div>
         </div>
 
+        {/* Clock */}
         <div style={{ textAlign: 'center' }}>
-          <div
-            style={{
-              fontSize: 36,
-              fontWeight: 800,
-              color: '#F9FAFB',
-              fontVariantNumeric: 'tabular-nums',
-              letterSpacing: '0.05em',
-            }}
-          >
+          <div style={{ fontSize: 38, fontWeight: 800, color: '#F9FAFB', fontVariantNumeric: 'tabular-nums', letterSpacing: '0.04em' }}>
             {currentTime}
           </div>
           <div style={{ fontSize: 13, color: '#9CA3AF' }}>{currentDate}</div>
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <div
-            style={{
-              width: 10,
-              height: 10,
-              borderRadius: '50%',
-              background: isConnected ? '#22C55E' : '#EF4444',
-              boxShadow: isConnected ? '0 0 10px rgba(34,197,94,0.8)' : 'none',
-              animation: isConnected ? 'pulse-glow 2s infinite' : 'none',
-            }}
-          />
-          <span style={{ fontSize: 14, color: '#9CA3AF', fontWeight: 500 }}>
-            {isConnected ? 'Live' : 'Reconnecting...'}
-          </span>
+        {/* Status */}
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 6 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            {isConnected ? <Wifi size={16} color="#22C55E" /> : <WifiOff size={16} color="#EF4444" />}
+            <span style={{ fontSize: 14, color: '#9CA3AF', fontWeight: 600 }}>
+              {isConnected ? 'Live' : 'Reconnecting…'}
+            </span>
+          </div>
+          {lastUpdated && (
+            <span style={{ fontSize: 11, color: '#4B5563', display: 'flex', alignItems: 'center', gap: 4 }}>
+              <Clock size={10} /> Updated {lastUpdated}
+            </span>
+          )}
         </div>
       </div>
 
-      {/* Main Content */}
-      <div style={{ flex: 1, display: 'grid', gridTemplateColumns: '1fr 380px', gap: 0 }}>
-        
-        {/* LEFT — Current Token */}
-        <div
-          style={{
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center',
-            justifyContent: 'center',
-            padding: '40px 60px',
-            borderRight: '1px solid rgba(255,255,255,0.05)',
-          }}
-        >
-          <div style={{ fontSize: 14, fontWeight: 600, color: '#6B7280', textTransform: 'uppercase', letterSpacing: '0.15em', marginBottom: 20 }}>
-            Now Serving
+      {/* ── Main Body ── */}
+      <div style={{ flex: 1, display: 'grid', gridTemplateColumns: '1fr 400px', minHeight: 0 }}>
+
+        {/* LEFT — Now Serving */}
+        <div style={{
+          display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+          padding: '40px 60px', borderRight: '1px solid rgba(255,255,255,0.05)',
+        }}>
+          <div style={{ fontSize: 13, fontWeight: 700, color: '#6B7280', textTransform: 'uppercase', letterSpacing: '0.18em', marginBottom: 24, display: 'flex', alignItems: 'center', gap: 8 }}>
+            <Stethoscope size={16} color="#6B7280" /> Now Serving
           </div>
 
           {currentToken ? (
-            <div
-              style={{ textAlign: 'center' }}
-              className={animateToken ? 'animate-token-appear' : ''}
-            >
-              <div
-                style={{
-                  fontSize: 'clamp(100px, 18vw, 180px)',
-                  fontWeight: 900,
-                  lineHeight: 1,
-                  background: 'linear-gradient(135deg, #6366F1, #8B5CF6, #06B6D4)',
-                  WebkitBackgroundClip: 'text',
-                  WebkitTextFillColor: 'transparent',
-                  backgroundClip: 'text',
-                  filter: 'drop-shadow(0 0 40px rgba(99,102,241,0.6))',
-                  marginBottom: 24,
-                  animation: 'pulse-glow 3s ease-in-out infinite',
-                }}
-              >
+            <div style={{ textAlign: 'center' }} className={animateToken ? 'animate-token-appear' : ''}>
+              {/* Big token number */}
+              <div style={{
+                fontSize: 'clamp(100px, 18vw, 200px)', fontWeight: 900, lineHeight: 1,
+                background: 'linear-gradient(135deg, #6366F1, #8B5CF6, #06B6D4)',
+                WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', backgroundClip: 'text',
+                filter: 'drop-shadow(0 0 40px rgba(99,102,241,0.5))',
+                marginBottom: 20,
+              }}>
                 #{currentToken.tokenNumber}
               </div>
 
-              <div
-                style={{
-                  fontSize: 28,
-                  fontWeight: 600,
-                  color: '#E5E7EB',
-                  marginBottom: 12,
-                }}
-              >
+              <div style={{ fontSize: 22, fontWeight: 600, color: '#E5E7EB', marginBottom: 16 }}>
                 Please proceed to your doctor
               </div>
 
-              <div
-                style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: 10,
-                  padding: '12px 28px',
-                  background: 'rgba(99,102,241,0.15)',
-                  border: '1px solid rgba(99,102,241,0.35)',
-                  borderRadius: 40,
-                  marginBottom: 20,
-                }}
-              >
-                <span style={{ fontSize: 18 }}>👨‍⚕️</span>
-                <span style={{ fontSize: 20, fontWeight: 600, color: '#C4B5FD' }}>
-                  {typeof currentToken.doctorId === 'object' ? currentToken.doctorId.name : 'Your Doctor'}
-                </span>
+              <div style={{
+                display: 'inline-flex', alignItems: 'center', gap: 10,
+                padding: '12px 28px', borderRadius: 40,
+                background: 'rgba(99,102,241,0.15)', border: '1px solid rgba(99,102,241,0.35)',
+              }}>
+                <span style={{ fontSize: 20 }}>👨‍⚕️</span>
+                <span style={{ fontSize: 20, fontWeight: 600, color: '#C4B5FD' }}>{doctorName}</span>
               </div>
             </div>
           ) : (
             <div style={{ textAlign: 'center' }}>
-              <div
-                style={{
-                  fontSize: 120,
-                  fontWeight: 900,
-                  color: 'rgba(99,102,241,0.15)',
-                  lineHeight: 1,
-                  marginBottom: 20,
-                }}
-              >
-                —
-              </div>
-              <p style={{ fontSize: 22, color: '#4B5563' }}>No patient currently being seen</p>
+              <div style={{ fontSize: 100, fontWeight: 900, color: 'rgba(99,102,241,0.12)', lineHeight: 1, marginBottom: 16 }}>—</div>
+              <p style={{ fontSize: 20, color: '#4B5563' }}>No patient currently being seen</p>
+              {waiting.length > 0 && (
+                <p style={{ fontSize: 16, color: '#6B7280', marginTop: 8 }}>
+                  {waiting.length} patient{waiting.length > 1 ? 's' : ''} waiting
+                </p>
+              )}
             </div>
           )}
         </div>
 
-        {/* RIGHT — Next Tokens + Stats */}
-        <div
-          style={{
-            display: 'flex',
-            flexDirection: 'column',
-            background: 'rgba(11,15,26,0.5)',
-            padding: '32px 28px',
-          }}
-        >
-          {/* Next tokens */}
-          <div style={{ marginBottom: 32 }}>
-            <div
-              style={{
-                fontSize: 13,
-                fontWeight: 700,
-                color: '#6B7280',
-                textTransform: 'uppercase',
-                letterSpacing: '0.12em',
-                marginBottom: 16,
-              }}
-            >
-              Up Next
+        {/* RIGHT — Queue list + stats */}
+        <div style={{
+          display: 'flex', flexDirection: 'column',
+          background: 'rgba(11,15,26,0.6)',
+          borderLeft: '1px solid rgba(255,255,255,0.04)',
+          overflow: 'hidden',
+        }}>
+          {/* Up Next header */}
+          <div style={{ padding: '24px 24px 12px', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+            <div style={{ fontSize: 12, fontWeight: 700, color: '#6B7280', textTransform: 'uppercase', letterSpacing: '0.12em', marginBottom: 2 }}>
+              📋 Up Next in Queue
             </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              {nextTokens.length === 0 ? (
-                <p style={{ color: '#4B5563', fontSize: 16, textAlign: 'center', padding: 20 }}>Queue is empty</p>
-              ) : (
-                nextTokens.map((t, idx) => (
-                  <div
-                    key={t._id}
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 14,
-                      padding: '14px 18px',
-                      background: idx === 0
-                        ? 'rgba(99,102,241,0.12)'
-                        : 'rgba(255,255,255,0.03)',
-                      border: `1px solid ${idx === 0 ? 'rgba(99,102,241,0.25)' : 'rgba(255,255,255,0.04)'}`,
-                      borderRadius: 12,
-                      transition: 'all 0.3s ease',
-                    }}
-                  >
-                    <span
-                      style={{
-                        fontSize: idx === 0 ? 26 : 22,
-                        fontWeight: 800,
-                        color: idx === 0 ? '#A5B4FC' : '#6B7280',
-                        minWidth: 60,
-                      }}
-                    >
-                      #{t.tokenNumber}
-                    </span>
-                    <div>
-                      <div style={{ fontSize: 16, color: idx === 0 ? '#E5E7EB' : '#9CA3AF', fontWeight: 600 }}>
-                        {/* Masked patient name */}
-                        {t.patientName.charAt(0)}{'•'.repeat(Math.min(t.patientName.length - 1, 5))}
-                      </div>
-                      <div style={{ fontSize: 12, color: '#4B5563', marginTop: 2 }}>
-                        ~{formatWaitTime(calculateWaitTime(idx, avgDuration))}
-                      </div>
-                    </div>
-                    {idx === 0 && (
-                      <div style={{ marginLeft: 'auto', fontSize: 11, color: '#6366F1', fontWeight: 600, background: 'rgba(99,102,241,0.15)', padding: '3px 8px', borderRadius: 20 }}>
-                        NEXT
-                      </div>
-                    )}
-                  </div>
-                ))
-              )}
+            <div style={{ fontSize: 28, fontWeight: 800, color: '#F59E0B' }}>
+              {waiting.length} <span style={{ fontSize: 14, fontWeight: 500, color: '#6B7280' }}>waiting</span>
             </div>
           </div>
 
-          {/* Stats */}
-          <div
-            style={{
-              borderTop: '1px solid rgba(255,255,255,0.05)',
-              paddingTop: 24,
-              display: 'flex',
-              flexDirection: 'column',
-              gap: 12,
-            }}
-          >
-            <div style={{ fontSize: 13, fontWeight: 700, color: '#6B7280', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 4 }}>
-              Queue Status
-            </div>
+          {/* Queue rows */}
+          <div style={{ flex: 1, overflowY: 'auto', padding: '12px 16px', display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {nextTokens.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: 40, color: '#4B5563', fontSize: 16 }}>
+                🎉 Queue is empty!
+              </div>
+            ) : (
+              nextTokens.map((t, idx) => {
+                const doc = typeof t.doctorId === 'object' ? t.doctorId : null;
+                return (
+                  <div key={t._id} style={{
+                    display: 'flex', alignItems: 'center', gap: 12,
+                    padding: '14px 16px', borderRadius: 12,
+                    background: idx === 0 ? 'rgba(99,102,241,0.14)' : 'rgba(255,255,255,0.03)',
+                    border: `1px solid ${idx === 0 ? 'rgba(99,102,241,0.3)' : 'rgba(255,255,255,0.05)'}`,
+                    transition: 'all 0.3s ease',
+                  }}>
+                    <span style={{ fontSize: idx === 0 ? 28 : 22, fontWeight: 800, color: idx === 0 ? '#A5B4FC' : '#6B7280', minWidth: 60, textAlign: 'center' }}>
+                      #{t.tokenNumber}
+                    </span>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: idx === 0 ? 17 : 15, fontWeight: 600, color: idx === 0 ? '#E5E7EB' : '#9CA3AF', marginBottom: 2 }}>
+                        {t.patientName.charAt(0)}{'•'.repeat(Math.min(t.patientName.length - 1, 5))}
+                      </div>
+                      {doc && (
+                        <div style={{ fontSize: 12, color: '#4B5563', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {doc.name}
+                        </div>
+                      )}
+                    </div>
+                    <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                      <div style={{ fontSize: 13, color: idx === 0 ? '#F59E0B' : '#4B5563', fontWeight: 600 }}>
+                        ~{formatWaitTime(calculateWaitTime(idx, avgDuration))}
+                      </div>
+                      {idx === 0 && (
+                        <div style={{ fontSize: 10, color: '#6366F1', fontWeight: 700, background: 'rgba(99,102,241,0.15)', padding: '2px 8px', borderRadius: 20, marginTop: 4 }}>
+                          NEXT
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })
+            )}
+            {waiting.length > 6 && (
+              <div style={{ textAlign: 'center', fontSize: 13, color: '#4B5563', padding: '8px 0' }}>
+                +{waiting.length - 6} more in queue
+              </div>
+            )}
+          </div>
+
+          {/* Stats footer */}
+          <div style={{ borderTop: '1px solid rgba(255,255,255,0.05)', padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: 8 }}>
             {[
-              { icon: '⏳', label: 'Waiting', value: totalWaiting, color: '#F59E0B' },
-              { icon: '⏱️', label: 'Avg Wait', value: `${avgDuration} min`, color: '#6366F1' },
-              { icon: '✅', label: 'Served Today', value: tokens.filter((t) => t.status === 'done').length, color: '#22C55E' },
-            ].map((s) => (
-              <div
-                key={s.label}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  padding: '12px 16px',
-                  background: 'rgba(255,255,255,0.03)',
-                  borderRadius: 10,
-                  border: '1px solid rgba(255,255,255,0.04)',
-                }}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                  <span style={{ fontSize: 18 }}>{s.icon}</span>
-                  <span style={{ fontSize: 14, color: '#9CA3AF' }}>{s.label}</span>
+              { icon: <Users size={16} />,        label: 'Waiting',      value: waiting.length, color: '#F59E0B' },
+              { icon: <Timer size={16} />,         label: 'Avg Wait',     value: `${avgDuration} min`,  color: '#6366F1' },
+              { icon: <CheckCircle2 size={16} />,  label: 'Served Today', value: done.length,    color: '#22C55E' },
+            ].map(s => (
+              <div key={s.label} style={{
+                display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                padding: '10px 14px', background: 'rgba(255,255,255,0.03)',
+                borderRadius: 10, border: '1px solid rgba(255,255,255,0.04)',
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  {s.icon}
+                  <span style={{ fontSize: 13, color: '#9CA3AF' }}>{s.label}</span>
                 </div>
-                <span style={{ fontSize: 22, fontWeight: 800, color: s.color }}>{s.value}</span>
+                <span style={{ fontSize: 20, fontWeight: 800, color: s.color }}>{s.value}</span>
               </div>
             ))}
           </div>
         </div>
       </div>
 
-      {/* Bottom ticker */}
-      <div
-        style={{
-          padding: '14px 48px',
-          background: 'linear-gradient(135deg, rgba(99,102,241,0.1), rgba(6,182,212,0.05))',
-          borderTop: '1px solid rgba(99,102,241,0.15)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          gap: 40,
-        }}
-      >
-        <span style={{ fontSize: 14, color: '#6B7280' }}>
-          🏥 MediQueue · OPD Queue Management System
-        </span>
-        <span style={{ fontSize: 14, color: '#4B5563' }}>|</span>
-        <span style={{ fontSize: 14, color: '#9CA3AF' }}>
-          Follow the display board for your token number
-        </span>
-        <span style={{ fontSize: 14, color: '#4B5563' }}>|</span>
-        <span style={{ fontSize: 14, color: '#6B7280' }}>
-          📞 Emergency: 102
-        </span>
+      {/* ── Footer Ticker ── */}
+      <div style={{
+        padding: '12px 40px',
+        background: 'linear-gradient(135deg, rgba(99,102,241,0.08), rgba(6,182,212,0.04))',
+        borderTop: '1px solid rgba(99,102,241,0.12)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 32, flexShrink: 0,
+      }}>
+        <span style={{ fontSize: 13, color: '#6B7280' }}>🏥 MediQueue · OPD Queue Management</span>
+        <span style={{ color: '#374151' }}>|</span>
+        <span style={{ fontSize: 13, color: '#9CA3AF' }}>Watch the display for your token number</span>
+        <span style={{ color: '#374151' }}>|</span>
+        <span style={{ fontSize: 13, color: '#6B7280' }}>📞 Emergency: 102</span>
       </div>
     </div>
   );
