@@ -268,18 +268,10 @@ body {
   display: flex;
   justify-content: flex-end;
   align-items: flex-end;
-  padding: env(safe-area-inset-top, 20px) 20px env(safe-area-inset-bottom, 20px) 20px;
+  padding: 20px;
+  gap: 14px;
   font-family: 'Inter', system-ui, sans-serif;
-  pointer-events: auto;
-}
-
-.chat-overlay {
-  position: fixed;
-  inset: 0;
-  background: rgba(15, 23, 42, 0.45);
-  backdrop-filter: blur(4px);
-  z-index: 10000;
-  pointer-events: auto;
+  pointer-events: none;
 }
 
 .chat-toggle-button {
@@ -330,7 +322,7 @@ body {
 
 .chat-panel {
   width: min(360px, calc(100vw - 32px));
-  max-height: min(560px, calc(100vh - 40px));
+  max-height: min(560px, calc(100vh - 64px));
   display: flex;
   position: relative;
   z-index: 10003;
@@ -479,6 +471,28 @@ body {
 .chat-send-button:disabled {
   opacity: 0.55;
   cursor: not-allowed;
+}
+
+.chat-footer {
+  display: flex;
+  justify-content: flex-end;
+  padding: 0 16px 16px;
+}
+
+.chat-footer-close {
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: #f8fafc;
+  border-radius: 14px;
+  padding: 10px 16px;
+  cursor: pointer;
+  font-size: 14px;
+  transition: background 0.2s ease, transform 0.2s ease;
+}
+
+.chat-footer-close:hover {
+  background: rgba(255, 255, 255, 0.1);
+  transform: translateY(-1px);
 }
 
 @keyframes chat-panel-enter {

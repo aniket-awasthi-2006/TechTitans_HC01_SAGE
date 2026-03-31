@@ -120,7 +120,6 @@ export default function ChatWidget() {
 
       {isOpen && (
         <>
-          <div className="chat-overlay" onClick={() => setIsOpen(false)} aria-hidden="true" />
           <div className="chat-panel glass-card-elevated" role="dialog" aria-modal="true" aria-label="MediQueue Assistant chat window">
             <div className="chat-header">
               <div className="chat-title-group">
@@ -183,6 +182,15 @@ export default function ChatWidget() {
               Send
             </button>
           </form>
+          <div className="chat-footer">
+            <button
+              type="button"
+              className="chat-footer-close"
+              onClick={() => setIsOpen(false)}
+            >
+              Close chat
+            </button>
+          </div>
         </div>
       </>
       )}
