@@ -42,7 +42,7 @@ export default function DashboardLayout({
       <div
         style={{
           minHeight: '100vh',
-          background: '#0B0F1A',
+          background: 'var(--background)',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
@@ -60,7 +60,7 @@ export default function DashboardLayout({
               margin: '0 auto 16px',
             }}
           />
-          <p style={{ color: '#6B7280', fontSize: 14 }}>Loading MediQueue...</p>
+          <p style={{ color: 'var(--text-muted)', fontSize: 14 }}>Loading MediQueue...</p>
         </div>
       </div>
     );

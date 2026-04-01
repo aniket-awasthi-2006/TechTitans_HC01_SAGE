@@ -13,7 +13,7 @@ interface User {
 interface AuthContextType {
   user: User | null;
   token: string | null;
-  login: (email: string, password: string) => Promise<{ error?: string }>;
+  login: (identifier: string, password: string, mode?: 'email' | 'phone') => Promise<{ error?: string }>;
   register: (data: RegisterData) => Promise<{ error?: string }>;
   logout: () => void;
   isLoading: boolean;
@@ -45,12 +45,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setIsLoading(false);
   }, []);
 
-  const login = async (email: string, password: string) => {
+  const login = async (identifier: string, password: string, mode: 'email' | 'phone' = 'email') => {
     try {
+      const body = mode === 'phone'
+        ? { phone: identifier, password }
+        : { email: identifier, password };
       const res = await fetch('/api/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password }),
+        body: JSON.stringify(body),
       });
       const data = await res.json();
       if (!res.ok) return { error: data.error || 'Login failed' };
@@ -60,7 +63,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setToken(data.token);
       setUser(data.user);
 
-      // Role-based redirect
       const redirectMap: Record<string, string> = {
         reception: '/reception/dashboard',
         doctor: '/doctor/dashboard',

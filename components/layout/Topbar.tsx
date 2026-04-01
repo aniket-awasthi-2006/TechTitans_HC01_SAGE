@@ -2,6 +2,7 @@
 
 import { useAuth } from '@/components/providers/AuthProvider';
 import { useSocket } from '@/components/providers/SocketProvider';
+import ThemeToggle from '@/components/ui/ThemeToggle';
 import { Wifi, WifiOff } from 'lucide-react';
 import React from 'react';
 
@@ -17,11 +18,13 @@ export default function Topbar({ title, subtitle }: TopbarProps) {
   return (
     <div className="topbar">
       <div>
-        <h1 style={{ fontSize: 20, fontWeight: 700, color: '#F9FAFB' }}>{title}</h1>
-        {subtitle && <p style={{ fontSize: 13, color: '#6B7280', marginTop: 2 }}>{subtitle}</p>}
+        <h1 style={{ fontSize: 20, fontWeight: 700, color: 'var(--text-primary)' }}>{title}</h1>
+        {subtitle && <p style={{ fontSize: 13, color: 'var(--text-muted)', marginTop: 2 }}>{subtitle}</p>}
       </div>
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+        <ThemeToggle compact />
+
         {/* Real-time status */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
           {isConnected
@@ -34,10 +37,10 @@ export default function Topbar({ title, subtitle }: TopbarProps) {
 
         {/* Time */}
         <div style={{
-          fontSize: 13, color: '#6B7280',
-          background: 'rgba(255,255,255,0.04)',
+          fontSize: 13, color: 'var(--text-muted)',
+          background: 'var(--theme-toggle-bg)',
           padding: '6px 12px', borderRadius: 8,
-          border: '1px solid rgba(255,255,255,0.06)',
+          border: '1px solid var(--theme-toggle-border)',
         }}>
           <LiveClock />
         </div>

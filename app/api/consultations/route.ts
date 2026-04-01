@@ -31,11 +31,18 @@ export async function GET(req: NextRequest) {
 
     } else {
       // Reception — can filter by patientId or doctorId
-      if (patientId)     query.patientId = patientId;
+      // Use $or so family bookings (patientId=undefined, bookedById=X) are also returned
+      if (patientId) {
+        query.$or = [
+          { patientId:  patientId },
+          { bookedById: patientId },
+        ];
+      }
       if (doctorIdParam) query.doctorId  = doctorIdParam;
     }
 
     const consultations = await Consultation.find(query)
+      .populate({ path: 'bookedById', select: 'name email phone', strictPopulate: false })
       .sort({ createdAt: -1 })
       .limit(100)
       .lean();
@@ -53,3 +60,4 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
+

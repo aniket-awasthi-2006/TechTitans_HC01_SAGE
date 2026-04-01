@@ -3,6 +3,7 @@ import connectDB from '@/lib/db';
 import Token from '@/models/Token';
 import Consultation from '@/models/Consultation';
 import { format } from 'date-fns';
+import { sortQueueForDoctor } from '@/lib/queue-sort';
 
 // Public endpoint — no auth required — used by the TV display board
 export async function GET() {
@@ -10,10 +11,11 @@ export async function GET() {
     await connectDB();
     const today = format(new Date(), 'yyyy-MM-dd');
 
-    const tokens = await Token.find({ date: today })
+    const rawTokens = await Token.find({ date: today })
       .populate('doctorId', 'name specialization')
       .sort({ tokenNumber: 1 })
       .lean();
+    const tokens = sortQueueForDoctor(rawTokens);
 
     // Calculate avg consultation duration for wait-time estimates
     const consultations = await Consultation.find({ date: today }).lean();

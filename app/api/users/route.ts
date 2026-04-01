@@ -8,8 +8,17 @@ export async function GET(req: NextRequest) {
     await connectDB();
     const { searchParams } = new URL(req.url);
     const role = searchParams.get('role') || 'doctor';
+    const search = searchParams.get('search') || '';
 
-    const users = await User.find({ role }).select('-password').lean();
+    // Build query — allow searching patients too (for reception's patient-lookup)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const query: Record<string, any> = { role };
+    if (search) {
+      const regex = new RegExp(search, 'i');
+      query.$or = [{ name: regex }, { email: regex }, { phone: regex }];
+    }
+
+    const users = await User.find(query).select('-password').lean();
     return NextResponse.json({ users });
   } catch (error) {
     console.error('[Users GET]', error);

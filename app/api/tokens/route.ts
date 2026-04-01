@@ -4,6 +4,8 @@ import Token from '@/models/Token';
 import { getTokenFromRequest } from '@/lib/auth';
 import { format } from 'date-fns';
 import { Server as SocketIOServer } from 'socket.io';
+import mongoose from 'mongoose';
+import { sortQueueForDoctor } from '@/lib/queue-sort';
 
 function getIO(): SocketIOServer | undefined {
   return (global as { io?: SocketIOServer }).io;
@@ -24,15 +26,18 @@ export async function GET(req: NextRequest) {
     if (user.role === 'doctor') {
       query.doctorId = user.id;
     } else if (user.role === 'patient') {
-      // Patients see all today's tokens (for queue snapshot). Client handles display.
+      // Patients see all today's tokens (queue snapshot). Client handles display.
     } else if (doctorId) {
       query.doctorId = doctorId;
     }
 
-    const tokens = await Token.find(query)
-      .populate('doctorId', 'name specialization')
+    const rawTokens = await Token.find(query)
+      .populate({ path: 'doctorId', select: 'name specialization', strictPopulate: false })
+      .populate({ path: 'bookedById', select: 'name email phone', strictPopulate: false })
       .sort({ tokenNumber: 1 })
       .lean();
+
+    const tokens = user.role === 'doctor' ? sortQueueForDoctor(rawTokens) : rawTokens;
 
     return NextResponse.json({ tokens });
   } catch (error) {
@@ -53,33 +58,55 @@ export async function POST(req: NextRequest) {
 
     const body = await req.json();
     const {
-      symptoms, doctorId,
+      doctorId,
       patientAge, patientGender, patientPhone, vitals,
       // Family member fields
       forSelf = true,
       familyName, familyRelationship,
+      // Reception supplies the registered patient account ID when linking a token
+      bookedById: bodyBookedById,
+      // Walk-in patient name when no registered patient is selected
+      patientName: bodyPatientName,
     } = body;
 
-    // Determine patient name based on self vs family
     const isSelf = forSelf !== false;
-    const patientName     = isSelf ? user.name : (familyName || '').trim();
-    const relationship    = isSelf ? 'self' : (familyRelationship || 'other');
-    const bookedById      = user.id;
-    // patientId is the account ID — only set for self
-    const patientId       = isSelf ? user.id : undefined;
+
+    // Resolve patient name
+    const patientName = isSelf
+      ? (bodyPatientName || user.name)
+      : (familyName || '').trim();
+
+    const relationship = isSelf ? 'self' : (familyRelationship || 'other');
+
+    // bookedById: only set when a real patient account is involved.
+    // - Patient booking for self/family: their own account ID
+    // - Reception linking to a registered patient: the selected patient's ID
+    // - Reception walk-in (no patient selected): leave undefined (no link)
+    let bookedById: string | undefined;
+    if (bodyBookedById && mongoose.Types.ObjectId.isValid(bodyBookedById)) {
+      bookedById = bodyBookedById;          // reception selected a registered patient
+    } else if (user.role === 'patient') {
+      bookedById = user.id;                 // patient booking for themselves/family
+    }
+    // else: receptionist walk-in — no bookedById stored
+
+    // patientId = registered account ID — set for self-bookings tied to an account
+    const patientId = isSelf
+      ? (bodyBookedById && mongoose.Types.ObjectId.isValid(bodyBookedById)
+          ? bodyBookedById
+          : (user.role === 'patient' ? user.id : undefined))
+      : undefined;
 
     if (!patientName) {
       return NextResponse.json({ error: 'Family member name is required' }, { status: 400 });
     }
-    if (!symptoms || !doctorId) {
-      return NextResponse.json({ error: 'symptoms and doctorId are required' }, { status: 400 });
+    if (!doctorId) {
+      return NextResponse.json({ error: 'doctorId is required' }, { status: 400 });
     }
 
     const today = format(new Date(), 'yyyy-MM-dd');
 
-    // Duplicate check:
-    // For self: block if the same account has an active (waiting/in-progress) token
-    // For family: block if same name + same booked-by + active today
+    // Duplicate check (patient role only)
     if (user.role === 'patient') {
       if (isSelf) {
         const existing = await Token.findOne({
@@ -92,7 +119,6 @@ export async function POST(req: NextRequest) {
           return NextResponse.json({ error: 'You are already in the queue. You can re-join after your consultation is complete.' }, { status: 409 });
         }
       } else {
-        // Prevent same family member from being added twice in same day and still active
         const existing = await Token.findOne({
           bookedById: user.id,
           patientName: { $regex: new RegExp(`^${patientName}$`, 'i') },
@@ -119,14 +145,14 @@ export async function POST(req: NextRequest) {
       patientPhone,
       relationship,
       vitals,
-      symptoms,
       doctorId,
       date: today,
       status: 'waiting',
     });
 
     const populatedToken = await Token.findById(token._id)
-      .populate('doctorId', 'name specialization')
+      .populate({ path: 'doctorId', select: 'name specialization', strictPopulate: false })
+      .populate({ path: 'bookedById', select: 'name email phone', strictPopulate: false })
       .lean();
 
     const io = getIO();

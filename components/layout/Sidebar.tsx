@@ -49,12 +49,12 @@ export default function Sidebar() {
   return (
     <aside className="sidebar">
       {/* Logo */}
-      <div style={{ padding: '24px 20px 20px', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+      <div style={{ padding: '24px 20px 20px', borderBottom: '1px solid var(--sidebar-border)' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <Image src="/logo.png" alt="MediQueue Logo" width={46} height={46} style={{ borderRadius: 12 }} />
           <div>
-            <div style={{ fontSize: 16, fontWeight: 700, color: '#F9FAFB' }}>MediQueue</div>
-            <div style={{ fontSize: 11, color: '#6B7280' }}>Queue Management</div>
+            <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--text-primary)' }}>MediQueue</div>
+            <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>Queue Management</div>
           </div>
         </div>
       </div>
@@ -75,7 +75,7 @@ export default function Sidebar() {
             {user.name.charAt(0).toUpperCase()}
           </div>
           <div>
-            <div style={{ fontSize: 13, fontWeight: 600, color: '#F9FAFB' }}>{user.name}</div>
+            <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)' }}>{user.name}</div>
             <div style={{ fontSize: 11, color: accent, fontWeight: 500 }}>
               {roleLabels[user.role as keyof typeof roleLabels]}
             </div>
@@ -85,7 +85,7 @@ export default function Sidebar() {
 
       {/* Nav items */}
       <nav style={{ flex: 1, padding: '8px 12px' }}>
-        <div style={{ fontSize: 11, fontWeight: 600, color: '#4B5563', textTransform: 'uppercase', letterSpacing: '0.06em', padding: '8px 8px 12px' }}>
+        <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', padding: '8px 8px 12px' }}>
           Navigation
         </div>
         {items.map(({ href, label, Icon }) => (
@@ -102,7 +102,7 @@ export default function Sidebar() {
       </nav>
 
       {/* Bottom — Sign out */}
-      <div style={{ padding: '16px 12px', borderTop: '1px solid rgba(255,255,255,0.05)' }}>
+      <div style={{ padding: '16px 12px', borderTop: '1px solid var(--sidebar-border)' }}>
         <button
           onClick={logout}
           className="sidebar-nav-item"

@@ -19,16 +19,49 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<Para
     if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
     const { id } = await params;
-    const { status, diagnosis, prescription, notes, duration } = await req.json();
+    const body = await req.json();
+    const { status, diagnosis, prescription, notes, duration, isPriority } = body;
 
     const token = await Token.findById(id);
     if (!token) return NextResponse.json({ error: 'Token not found' }, { status: 404 });
+
+    if (typeof isPriority === 'boolean') {
+      if (user.role !== 'reception') {
+        return NextResponse.json({ error: 'Only reception can set patient priority' }, { status: 403 });
+      }
+      if (token.status !== 'waiting') {
+        return NextResponse.json({ error: 'Only waiting patients can be marked as priority' }, { status: 409 });
+      }
+      token.isPriority = isPriority;
+      token.priorityMarkedAt = isPriority ? new Date() : undefined;
+    }
+
+    // Patients may only cancel their OWN waiting tokens
+    if (user.role === 'patient') {
+      const isOwner =
+        token.bookedById?.toString() === user.id ||
+        token.patientId?.toString() === user.id;
+      if (!isOwner) {
+        return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+      }
+      if (status === 'cancelled' && token.status !== 'waiting') {
+        return NextResponse.json(
+          { error: 'You can only leave the queue before being called.' },
+          { status: 409 }
+        );
+      }
+    }
 
     const previousStatus = token.status;
     token.status = status || token.status;
 
     if (status === 'in-progress') {
       token.calledAt = new Date();
+    }
+
+    if (status && status !== 'waiting') {
+      token.isPriority = false;
+      token.priorityMarkedAt = undefined;
     }
 
     if (status === 'done') {
@@ -38,8 +71,8 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<Para
       if (diagnosis && prescription) {
         await Consultation.create({
           tokenId:      token._id,
-          patientId:    token.patientId,          // undefined for family members — that's OK
-          bookedById:   token.bookedById || token.patientId,  // always set
+          patientId:    token.patientId,
+          bookedById:   token.bookedById || token.patientId,
           doctorId:     token.doctorId,
           patientName:  token.patientName,
           doctorName:   user.name,
@@ -56,7 +89,10 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<Para
 
     await token.save();
 
-    const updatedToken = await Token.findById(id).populate('doctorId', 'name specialization').lean();
+    const updatedToken = await Token.findById(id)
+      .populate({ path: 'doctorId', select: 'name specialization', strictPopulate: false })
+      .populate({ path: 'bookedById', select: 'name email phone', strictPopulate: false })
+      .lean();
 
     // Emit socket events
     const io = getIO();
@@ -65,7 +101,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<Para
       if (status === 'in-progress') {
         io.emit('doctor_called_next', { token: updatedToken, doctorName: user.name });
       }
-      if (status === 'done') {
+      if (status === 'done' || status === 'cancelled') {
         io.emit('consultation_completed', { tokenId: id, doctorId: user.id });
       }
       io.emit('queue_updated', { date: token.date, previousStatus });
@@ -86,7 +122,10 @@ export async function GET(req: NextRequest, { params }: { params: Promise<Params
     if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
     const { id } = await params;
-    const token = await Token.findById(id).populate('doctorId', 'name specialization').lean();
+    const token = await Token.findById(id)
+      .populate({ path: 'doctorId', select: 'name specialization', strictPopulate: false })
+      .populate({ path: 'bookedById', select: 'name email phone', strictPopulate: false })
+      .lean();
 
     if (!token) return NextResponse.json({ error: 'Token not found' }, { status: 404 });
     return NextResponse.json({ token });

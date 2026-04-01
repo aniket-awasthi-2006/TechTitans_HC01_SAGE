@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from 'react';
 import DashboardLayout from '@/components/layout/DashboardLayout';
 import { useAuth } from '@/components/providers/AuthProvider';
 import toast from 'react-hot-toast';
+import PrescriptionDisplay from '@/components/ui/PrescriptionDisplay';
 
 interface Consultation {
   _id: string;
@@ -200,10 +201,9 @@ export default function PatientHistoryPage() {
                     <div style={{ fontSize: 15, fontWeight: 600, color: '#E5E7EB' }}>🩺 {c.diagnosis}</div>
                   </div>
 
-                  {/* Prescription */}
                   <div style={{ background: 'rgba(255,255,255,0.03)', borderRadius: 10, padding: '12px 14px', marginBottom: c.notes ? 10 : 0 }}>
-                    <div style={{ fontSize: 11, fontWeight: 700, color: '#6B7280', letterSpacing: '0.06em', marginBottom: 6 }}>PRESCRIPTION</div>
-                    <div style={{ fontSize: 14, color: '#D1D5DB', lineHeight: 1.5 }}>💊 {c.prescription}</div>
+                    <div style={{ fontSize: 11, fontWeight: 700, color: '#6B7280', letterSpacing: '0.06em', marginBottom: 8 }}>PRESCRIPTION</div>
+                    <PrescriptionDisplay prescription={c.prescription} />
                   </div>
 
                   {/* Doctor's notes */}

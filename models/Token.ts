@@ -19,6 +19,8 @@ export interface IToken extends Document {
   };
   symptoms: string;
   status: 'waiting' | 'in-progress' | 'done' | 'cancelled';
+  isPriority: boolean;
+  priorityMarkedAt?: Date;
   calledAt?: Date;
   completedAt?: Date;
   date: string; // YYYY-MM-DD
@@ -40,12 +42,14 @@ const TokenSchema = new Schema<IToken>(
     vitals: {
       bp: String, temp: String, pulse: String, weight: String, spo2: String,
     },
-    symptoms: { type: String, required: true },
+    symptoms: { type: String },
     status: {
       type: String,
       enum: ['waiting', 'in-progress', 'done', 'cancelled'],
       default: 'waiting',
     },
+    isPriority: { type: Boolean, default: false },
+    priorityMarkedAt: { type: Date },
     calledAt:    { type: Date },
     completedAt: { type: Date },
     date:        { type: String, required: true },
@@ -55,6 +59,7 @@ const TokenSchema = new Schema<IToken>(
 
 TokenSchema.index({ bookedById: 1, date: 1, status: 1 });
 TokenSchema.index({ doctorId: 1, date: 1, status: 1 });
+TokenSchema.index({ doctorId: 1, date: 1, status: 1, isPriority: -1, priorityMarkedAt: 1, tokenNumber: 1 });
 
 const Token: Model<IToken> = mongoose.models.Token || mongoose.model<IToken>('Token', TokenSchema);
 export default Token;

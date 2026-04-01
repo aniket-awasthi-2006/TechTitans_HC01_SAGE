@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import DashboardLayout from '@/components/layout/DashboardLayout';
 import { useAuth } from '@/components/providers/AuthProvider';
 import { useSocket } from '@/components/providers/SocketProvider';
@@ -8,9 +8,10 @@ import { calculateWaitTime, formatWaitTime } from '@/lib/wait-time';
 import toast from 'react-hot-toast';
 import {
   Hash, UserCircle, Users, Stethoscope, Clock, CheckCircle2,
-  AlertCircle, CalendarDays, Pill, FileText, X, ChevronDown,
+  AlertCircle, CalendarDays, FileText,
   UserPlus, RefreshCw, Mars, Venus, CircleDot,
 } from 'lucide-react';
+import PrescriptionDisplay from '@/components/ui/PrescriptionDisplay';
 
 interface Token {
   _id: string;
@@ -22,7 +23,6 @@ interface Token {
   patientGender?: 'male' | 'female' | 'other';
   status: 'waiting' | 'in-progress' | 'done' | 'cancelled';
   doctorId: { _id: string; name: string; specialization?: string } | string;
-  symptoms?: string;
 }
 
 interface Consultation {
@@ -42,7 +42,7 @@ const RELATIONSHIP_LABELS: Record<string, string> = {
 
 const defaultJoinForm = {
   forSelf: true, familyName: '', familyRelationship: 'spouse',
-  age: '', gender: '', doctorId: '', symptoms: '',
+  age: '', gender: '', doctorId: '',
 };
 
 export default function PatientDashboard() {
@@ -52,30 +52,35 @@ export default function PatientDashboard() {
   const [allTokens, setAllTokens]   = useState<Token[]>([]);
   const [myTokens, setMyTokens]     = useState<Token[]>([]);
   const [history, setHistory]       = useState<Consultation[]>([]);
-  const [doctors, setDoctors]       = useState<Array<{ _id: string; name: string; specialization?: string }>>([]);
+  const [doctors, setDoctors]       = useState<Array<{ _id: string; name: string; specialization?: string; isAvailable?: boolean }>>([]);
   const [avgDuration, setAvgDuration] = useState(10);
   const [showJoinModal, setShowJoinModal] = useState(false);
   const [joinForm, setJoinForm]     = useState(defaultJoinForm);
   const [isPageLoading, setIsPageLoading] = useState(true);
   const [isJoining, setIsJoining]   = useState(false);
   const [animateQueue, setAnimateQueue] = useState(false);
+  const [unavailableNotice, setUnavailableNotice] = useState<{ doctorName: string } | null>(null);
+  // Stable ref so socket handler always has fresh myTokens
+  const myTokensRef = useRef<Token[]>([]);
 
   const fetchData = useCallback(async () => {
     if (!token || !user) return;
     try {
       const [tRes, consRes, dRes] = await Promise.all([
-        fetch('/api/tokens',           { headers: { Authorization: `Bearer ${token}` } }),
-        fetch('/api/consultations',    { headers: { Authorization: `Bearer ${token}` } }),
-        fetch('/api/users?role=doctor',{ headers: { Authorization: `Bearer ${token}` } }),
+        fetch('/api/tokens',            { headers: { Authorization: `Bearer ${token}` } }),
+        fetch('/api/consultations',     { headers: { Authorization: `Bearer ${token}` } }),
+        fetch('/api/users?role=doctor', { headers: { Authorization: `Bearer ${token}` } }),
       ]);
       const [tData, consData, dData] = await Promise.all([tRes.json(), consRes.json(), dRes.json()]);
 
       const allT: Token[] = tData.tokens || [];
       setAllTokens(allT);
-      setMyTokens(allT.filter(t =>
+      const mt = allT.filter((t: Token) =>
         (t.bookedById === user.id || t.patientId === user.id) &&
         ['waiting', 'in-progress'].includes(t.status)
-      ));
+      );
+      setMyTokens(mt);
+      myTokensRef.current = mt;
       setHistory(consData.consultations || []);
       setDoctors(dData.users || []);
       setAvgDuration(consData.avgDuration || 10);
@@ -88,15 +93,30 @@ export default function PatientDashboard() {
   useEffect(() => {
     if (!socket) return;
     const refresh = () => { setAnimateQueue(true); setTimeout(() => setAnimateQueue(false), 600); fetchData(); };
+    const handleAvailability = ({ doctorId, isAvailable, doctorName }: { doctorId: string; isAvailable: boolean; doctorName: string }) => {
+      if (!isAvailable) {
+        const affected = myTokensRef.current.some(t => {
+          const tDocId = typeof t.doctorId === 'object' ? t.doctorId._id : t.doctorId;
+          return tDocId === doctorId && t.status === 'waiting';
+        });
+        if (affected) setUnavailableNotice({ doctorName });
+      } else {
+        setUnavailableNotice(null);
+      }
+      fetchData();
+    };
     ['queue_updated','token_updated','token_created','doctor_called_next','consultation_completed'].forEach(e => socket.on(e, refresh));
-    return () => ['queue_updated','token_updated','token_created','doctor_called_next','consultation_completed'].forEach(e => socket.off(e, refresh));
+    socket.on('doctor_availability_changed', handleAvailability);
+    return () => {
+      ['queue_updated','token_updated','token_created','doctor_called_next','consultation_completed'].forEach(e => socket.off(e, refresh));
+      socket.off('doctor_availability_changed', handleAvailability);
+    };
   }, [socket, fetchData]);
 
   const joinQueue = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!joinForm.gender)                 { toast.error('Please select gender'); return; }
-    if (!joinForm.doctorId)               { toast.error('Please select a doctor'); return; }
-    if (!joinForm.symptoms.trim())        { toast.error('Please describe symptoms'); return; }
+    if (!joinForm.gender)  { toast.error('Please select gender'); return; }
+    if (!joinForm.doctorId){ toast.error('Please select a doctor'); return; }
     if (!joinForm.forSelf && !joinForm.familyName.trim()) { toast.error("Enter family member's name"); return; }
 
     setIsJoining(true);
@@ -105,10 +125,12 @@ export default function PatientDashboard() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({
-          forSelf: joinForm.forSelf, familyName: joinForm.familyName,
+          forSelf: joinForm.forSelf,
+          familyName: joinForm.familyName,
           familyRelationship: joinForm.familyRelationship,
           patientAge: joinForm.age ? parseInt(joinForm.age) : undefined,
-          patientGender: joinForm.gender, doctorId: joinForm.doctorId, symptoms: joinForm.symptoms,
+          patientGender: joinForm.gender,
+          doctorId: joinForm.doctorId,
         }),
       });
       const data = await res.json();
@@ -118,6 +140,22 @@ export default function PatientDashboard() {
       } else { toast.error(data.error || 'Failed to join'); }
     } catch { toast.error('Network error'); }
     setIsJoining(false);
+  };
+
+  const leaveQueue = async (tokenId: string) => {
+    if (!confirm('Leave the queue? Your token will be cancelled.')) return;
+    try {
+      const res = await fetch(`/api/tokens/${tokenId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ status: 'cancelled' }),
+      });
+      if (res.ok) { toast.success('You have left the queue.'); fetchData(); }
+      else {
+        const d = await res.json();
+        toast.error(d.error || 'Failed to leave queue');
+      }
+    } catch { toast.error('Network error'); }
   };
 
   const waiting = allTokens.filter(t => t.status === 'waiting');
@@ -205,19 +243,36 @@ export default function PatientDashboard() {
                     <info.Icon size={15} /> {info.text}
                   </div>
 
-                  {/* Stats */}
+                  {/* Wait Stats */}
                   {tok.status === 'waiting' && pos >= 0 && (
                     <div style={{ display: 'flex', borderRadius: 14, overflow: 'hidden', background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)' }}>
                       {[
-                        { label: 'Position', value: `#${pos + 1}`, color: '#6366F1' },
-                        { label: 'Est. Wait', value: formatWaitTime(wait), color: '#F59E0B' },
-                        { label: 'In Queue', value: waiting.length, color: '#22C55E' },
+                        { label: 'Position',  value: `#${pos + 1}`,           color: '#6366F1' },
+                        { label: 'Est. Wait', value: formatWaitTime(wait),    color: '#F59E0B' },
+                        { label: 'In Queue',  value: waiting.length,          color: '#22C55E' },
                       ].map((s, i) => (
                         <div key={i} style={{ flex: 1, padding: '14px 8px', textAlign: 'center', borderRight: i < 2 ? '1px solid rgba(255,255,255,0.06)' : 'none' }}>
                           <div style={{ fontSize: 24, fontWeight: 800, color: s.color }}>{s.value}</div>
                           <div style={{ fontSize: 11, color: '#6B7280', marginTop: 3 }}>{s.label}</div>
                         </div>
                       ))}
+                    </div>
+                  )}
+
+                  {/* Leave Queue button */}
+                  {tok.status === 'waiting' && (
+                    <div style={{ marginTop: 16 }}>
+                      <button
+                        onClick={() => leaveQueue(tok._id)}
+                        style={{
+                          padding: '8px 22px', borderRadius: 10,
+                          border: '1px solid rgba(239,68,68,0.35)',
+                          background: 'rgba(239,68,68,0.08)', color: '#FCA5A5',
+                          fontSize: 13, fontWeight: 600, cursor: 'pointer',
+                        }}
+                      >
+                        🚪 Leave Queue
+                      </button>
                     </div>
                   )}
                 </div>
@@ -300,8 +355,9 @@ export default function PatientDashboard() {
                   <div style={{ fontSize: 14, fontWeight: 600, color: '#E5E7EB', marginBottom: 4, display: 'flex', alignItems: 'center', gap: 6 }}>
                     <Stethoscope size={13} color="#A5B4FC" /> {c.diagnosis}
                   </div>
-                  <div style={{ fontSize: 13, color: '#9CA3AF', display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <Pill size={13} color="#9CA3AF" /> {c.prescription}
+                  <div style={{ fontSize: 13, color: '#9CA3AF', display: 'flex', alignItems: 'flex-start', gap: 6 }}>
+                    <span style={{ marginTop: 2, flexShrink: 0 }}>💊</span>
+                    <PrescriptionDisplay prescription={c.prescription} compact />
                   </div>
                   {c.notes && <div style={{ fontSize: 12, color: '#6B7280', marginTop: 4, fontStyle: 'italic', display: 'flex', alignItems: 'center', gap: 6 }}>
                     <FileText size={12} /> {c.notes}
@@ -322,9 +378,7 @@ export default function PatientDashboard() {
               <h2 style={{ fontSize: 19, fontWeight: 700, color: '#F9FAFB', margin: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
                 <UserPlus size={20} color="#6366F1" /> Join OPD Queue
               </h2>
-              <button onClick={() => setShowJoinModal(false)} style={{ background: 'none', border: 'none', color: '#6B7280', cursor: 'pointer' }}>
-                <X size={22} />
-              </button>
+              <button onClick={() => setShowJoinModal(false)} style={{ background: 'none', border: 'none', color: '#6B7280', cursor: 'pointer', fontSize: 22 }}>✕</button>
             </div>
 
             <form onSubmit={joinQueue} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
@@ -403,13 +457,6 @@ export default function PatientDashboard() {
                 </select>
               </div>
 
-              {/* Symptoms */}
-              <div>
-                <label style={labelStyle}>SYMPTOMS / REASON *</label>
-                <textarea rows={3} placeholder="Describe symptoms…" value={joinForm.symptoms} onChange={e => setJoinForm(f => ({ ...f, symptoms: e.target.value }))} required
-                  style={{ ...inputStyle, resize: 'vertical', fontFamily: 'inherit', padding: '12px 14px' }} />
-              </div>
-
               <div style={{ display: 'flex', gap: 10, marginTop: 2 }}>
                 <button type="button" onClick={() => setShowJoinModal(false)} style={{ flex: 1, padding: '13px', borderRadius: 10, background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', color: '#9CA3AF', fontSize: 14, fontWeight: 600, cursor: 'pointer' }}>
                   Cancel
@@ -419,6 +466,45 @@ export default function PatientDashboard() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* ── Doctor Unavailability Emergency Notice ── */}
+      {unavailableNotice && (
+        <div style={{
+          position: 'fixed', inset: 0, zIndex: 2000,
+          background: 'rgba(0,0,0,0.88)', backdropFilter: 'blur(10px)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24,
+        }}>
+          <div style={{
+            background: 'linear-gradient(135deg, #1A0A0A, #1A0808)',
+            border: '1px solid rgba(239,68,68,0.5)',
+            borderRadius: 24, padding: '40px 36px', textAlign: 'center',
+            maxWidth: 440, width: '100%',
+            boxShadow: '0 0 80px rgba(239,68,68,0.15), 0 32px 64px rgba(0,0,0,0.6)',
+          }}>
+            <div style={{ fontSize: 56, marginBottom: 16 }}>🚨</div>
+            <h2 style={{ fontSize: 22, fontWeight: 800, color: '#FCA5A5', marginBottom: 12 }}>
+              We&apos;re Sorry
+            </h2>
+            <p style={{ fontSize: 15, color: '#9CA3AF', lineHeight: 1.7, marginBottom: 28 }}>
+              <strong style={{ color: '#F9FAFB' }}>Dr. {unavailableNotice.doctorName}</strong> is currently
+              unavailable due to an <strong style={{ color: '#FCA5A5' }}>emergency</strong>.
+              <br /><br />
+              Please proceed to the reception desk for assistance or to be reassigned.
+            </p>
+            <button
+              onClick={() => setUnavailableNotice(null)}
+              style={{
+                padding: '12px 32px', borderRadius: 12, cursor: 'pointer',
+                border: '1px solid rgba(239,68,68,0.4)',
+                background: 'rgba(239,68,68,0.15)', color: '#FCA5A5',
+                fontSize: 14, fontWeight: 700,
+              }}
+            >
+              OK, I Understand
+            </button>
           </div>
         </div>
       )}
