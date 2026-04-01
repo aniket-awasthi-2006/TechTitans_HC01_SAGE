@@ -4,8 +4,8 @@ import { signToken } from '@/lib/auth';
 // Demo users — fallback without MongoDB
 const DEMO_USERS = [
   { id: 'demo-reception-001', name: 'Reception Staff',   email: 'reception@hospital.com', phone: null, password: 'password123', role: 'reception' as const },
-  { id: 'demo-doctor-001',    name: 'Dr. Priya Sharma',  email: 'doctor@hospital.com',    phone: null, password: 'password123', role: 'doctor'    as const, specialization: 'General Medicine' },
-  { id: 'demo-doctor-002',    name: 'Dr. Rohan Mehta',   email: 'doctor2@hospital.com',   phone: null, password: 'password123', role: 'doctor'    as const, specialization: 'Cardiology' },
+  { id: 'demo-doctor-001',    name: 'Priya Sharma',  email: 'doctor@hospital.com',    phone: null, password: 'password123', role: 'doctor'    as const, specialization: 'General Medicine' },
+  { id: 'demo-doctor-002',    name: 'Rohan Mehta',   email: 'doctor2@hospital.com',   phone: null, password: 'password123', role: 'doctor'    as const, specialization: 'Cardiology' },
   { id: 'demo-patient-001',   name: 'Patient Demo',       email: 'patient@hospital.com',   phone: null, password: 'password123', role: 'patient'   as const },
 ];
 

@@ -1,12 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import connectDB from '@/lib/db';
 import Token from '@/models/Token';
+import User from '@/models/User';
 import { getTokenFromRequest } from '@/lib/auth';
 import { format } from 'date-fns';
 import { Server as SocketIOServer } from 'socket.io';
 import mongoose from 'mongoose';
 import { sortQueueForDoctor } from '@/lib/queue-sort';
-import { sendTokenCreatedNotifications, sendWaitWindowNotifications } from '@/lib/queue-notifications';
+import { sendWaitWindowNotifications } from '@/lib/queue-notifications';
 
 function getIO(): SocketIOServer | undefined {
   return (global as { io?: SocketIOServer }).io;
@@ -72,9 +73,18 @@ export async function POST(req: NextRequest) {
 
     const isSelf = forSelf !== false;
 
+    let linkedPatientName = '';
+    if (bodyBookedById && mongoose.Types.ObjectId.isValid(bodyBookedById)) {
+      const linkedPatient = await User.findById(bodyBookedById)
+        .select('name role')
+        .lean();
+      linkedPatientName = linkedPatient?.role === 'patient' ? linkedPatient.name?.trim() || '' : '';
+    }
+
     // Resolve patient name
+    const walkInPatientName = (bodyPatientName || '').trim();
     const patientName = isSelf
-      ? (bodyPatientName || user.name)
+      ? (walkInPatientName || linkedPatientName || (user.role === 'patient' ? user.name : ''))
       : (familyName || '').trim();
 
     const relationship = isSelf ? 'self' : (familyRelationship || 'other');
@@ -99,7 +109,13 @@ export async function POST(req: NextRequest) {
       : undefined;
 
     if (!patientName) {
-      return NextResponse.json({ error: 'Family member name is required' }, { status: 400 });
+      return NextResponse.json(
+        { error: isSelf ? 'Patient name is required' : 'Family member name is required' },
+        { status: 400 }
+      );
+    }
+    if (user.role === 'reception' && !String(patientPhone || '').trim()) {
+      return NextResponse.json({ error: 'Patient phone is required for reception token creation' }, { status: 400 });
     }
     if (!doctorId) {
       return NextResponse.json({ error: 'doctorId is required' }, { status: 400 });
@@ -143,7 +159,7 @@ export async function POST(req: NextRequest) {
       patientName,
       patientAge: patientAge || 0,
       patientGender: patientGender || 'other',
-      patientPhone,
+      patientPhone: patientPhone?.trim(),
       relationship,
       vitals,
       doctorId,
@@ -163,18 +179,6 @@ export async function POST(req: NextRequest) {
     }
 
     try {
-      await sendTokenCreatedNotifications({
-        actorRole: user.role,
-        date: today,
-        doctorId: String(doctorId),
-        token: {
-          _id: String(token._id),
-          tokenNumber,
-          patientName,
-          patientId,
-          bookedById,
-        },
-      });
       await sendWaitWindowNotifications(today, String(doctorId));
     } catch (notifyError) {
       console.error('[Tokens POST Notifications]', notifyError);

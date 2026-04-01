@@ -21,7 +21,7 @@ export async function GET(req: NextRequest) {
 
     } else if (user.role === 'patient') {
       // Patient sees their own AND all family members they booked for.
-      // bookedById is always the logged-in patient's account ID.
+      // Some legacy/walk-in records may not include bookedById.
       query = {
         $or: [
           { bookedById: user.id },  // includes self + family members
@@ -60,4 +60,3 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
-

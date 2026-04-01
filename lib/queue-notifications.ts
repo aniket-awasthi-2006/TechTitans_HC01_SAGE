@@ -112,64 +112,6 @@ type CancellationNotificationInput = {
   };
 };
 
-type TokenCreatedNotificationInput = {
-  actorRole: 'patient' | 'reception' | 'doctor';
-  date: string;
-  doctorId: string;
-  token: {
-    _id: string;
-    tokenNumber: number;
-    patientName: string;
-    patientId?: unknown;
-    bookedById?: unknown;
-  };
-};
-
-export async function sendTokenCreatedNotifications(input: TokenCreatedNotificationInput) {
-  if (!isFcmAdminConfigured()) return;
-
-  const { actorRole, date, doctorId, token } = input;
-  if (actorRole === 'patient') return;
-
-  const ownerRecipients = getRecipientUserIds(token);
-  if (ownerRecipients.length > 0) {
-    await sendToUsers(ownerRecipients, {
-      title: 'Token Added To Queue',
-      body: `${token.patientName} was added as Token #${token.tokenNumber}. You are now in the OPD queue.`,
-      data: {
-        type: 'token-created',
-        tokenId: token._id,
-        link: '/patient/dashboard',
-      },
-    });
-  }
-
-  const affectedWaiting = await Token.find(
-    { date, doctorId, status: 'waiting', _id: { $ne: token._id } },
-    { patientId: 1, bookedById: 1 }
-  ).lean();
-
-  const waitingRecipients = Array.from(
-    new Set(
-      affectedWaiting
-        .flatMap((item) => getRecipientUserIds(item))
-        .filter((userId) => !ownerRecipients.includes(userId))
-    )
-  );
-
-  if (waitingRecipients.length > 0) {
-    await sendToUsers(waitingRecipients, {
-      title: 'Queue Updated',
-      body: `${token.patientName} was added to the queue. Your waiting time may increase.`,
-      data: {
-        type: 'queue-update',
-        tokenId: token._id,
-        link: '/patient/dashboard',
-      },
-    });
-  }
-}
-
 export async function sendCancellationNotifications(input: CancellationNotificationInput) {
   if (!isFcmAdminConfigured()) return;
 

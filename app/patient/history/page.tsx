@@ -186,7 +186,7 @@ export default function PatientHistoryPage() {
                           <span style={{ color: accent, fontWeight: 600, background: `${accent}15`, padding: '1px 8px', borderRadius: 20, fontSize: 11 }}>
                             {RELATIONSHIP_LABELS[rel] || rel}
                           </span>
-                          <span style={{ color: '#4B5563', marginLeft: 8 }}>· Dr. {c.doctorName}</span>
+                          <span style={{ color: '#4B5563', marginLeft: 8 }}>· {c.doctorName}</span>
                         </div>
                       </div>
                     </div>
@@ -209,7 +209,7 @@ export default function PatientHistoryPage() {
                   {/* Doctor's notes */}
                   {c.notes && (
                     <div style={{ background: 'rgba(245,158,11,0.06)', border: '1px solid rgba(245,158,11,0.18)', borderRadius: 10, padding: '10px 14px' }}>
-                      <div style={{ fontSize: 11, fontWeight: 700, color: '#D97706', letterSpacing: '0.06em', marginBottom: 4 }}>DOCTOR'S NOTES</div>
+                      <div style={{ fontSize: 11, fontWeight: 700, color: '#D97706', letterSpacing: '0.06em', marginBottom: 4 }}>DOCTOR&apos;S NOTES</div>
                       <div style={{ fontSize: 13, color: '#FCD34D', lineHeight: 1.5 }}>📝 {c.notes}</div>
                     </div>
                   )}

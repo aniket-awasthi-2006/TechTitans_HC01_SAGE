@@ -70,7 +70,7 @@ export default function PatientLogin() {
             display: 'flex', alignItems: 'center', justifyContent: 'center',
             fontSize: isMobile ? 28 : 36, margin: `0 auto ${isMobile ? 14 : 20}px`,
             boxShadow: '0 12px 40px rgba(6,182,212,0.35)',
-          }}>🧑‍⚕️</div>
+          }}>🙋</div>
           <h1 style={{ fontSize: isMobile ? 26 : 30, fontWeight: 900, color: 'var(--text-primary)', margin: '0 0 8px', letterSpacing: '-0.02em' }}>
             Patient Portal
           </h1>

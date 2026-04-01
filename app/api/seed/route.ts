@@ -27,8 +27,8 @@ export async function POST(_req: NextRequest) {
 
     const usersData = [
       { name: 'Reception Staff',  email: 'reception@hospital.com', password: await hash('password123'), role: 'reception' },
-      { name: 'Dr. Priya Sharma', email: 'doctor@hospital.com',    password: await hash('password123'), role: 'doctor',    specialization: 'General Medicine' },
-      { name: 'Dr. Rohan Mehta',  email: 'doctor2@hospital.com',   password: await hash('password123'), role: 'doctor',    specialization: 'Cardiology' },
+      { name: 'Priya Sharma', email: 'doctor@hospital.com',    password: await hash('password123'), role: 'doctor',    specialization: 'General Medicine' },
+      { name: 'Rohan Mehta',  email: 'doctor2@hospital.com',   password: await hash('password123'), role: 'doctor',    specialization: 'Cardiology' },
       { name: 'Patient Demo',     email: 'patient@hospital.com',   password: await hash('password123'), role: 'patient' },
     ];
 

@@ -5,12 +5,13 @@ import { useRouter } from 'next/navigation';
 import { useAuth } from '@/components/providers/AuthProvider';
 import Link from 'next/link';
 import Image from 'next/image';
+import SupportChatbot from '@/components/ui/SupportChatbot';
 
 const roles = [
   {
     key: 'patient',
     label: 'Patient',
-    icon: '🧑‍⚕️',
+    icon: '🙋',
     desc: 'Join the queue, track your position & view prescriptions',
     gradient: 'linear-gradient(135deg, #06B6D4, #0EA5E9)',
     shadow: 'rgba(6,182,212,0.35)',
@@ -193,12 +194,8 @@ export default function LoginPortal() {
         </Link>
       </p>
 
-      {/* TV Display link */}
-      <p style={{ marginTop: 12, fontSize: 12, color: '#374151', textAlign: 'center' }}>
-        <Link href="/display" style={{ color: '#4B5563', textDecoration: 'none' }}>
-          📺 Open TV Display Panel →
-        </Link>
-      </p>
+      <SupportChatbot />
+
     </div>
   );
 }

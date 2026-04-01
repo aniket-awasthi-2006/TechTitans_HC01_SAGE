@@ -6,6 +6,7 @@ import { getTokenFromRequest } from '@/lib/auth';
 import { format } from 'date-fns';
 import { Server as SocketIOServer } from 'socket.io';
 import { sendCancellationNotifications, sendWaitWindowNotifications } from '@/lib/queue-notifications';
+import mongoose from 'mongoose';
 
 function getIO(): SocketIOServer | undefined {
   return (global as { io?: SocketIOServer }).io;
@@ -21,10 +22,89 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<Para
 
     const { id } = await params;
     const body = await req.json();
-    const { status, diagnosis, prescription, notes, duration, isPriority } = body;
+    const {
+      status, diagnosis, prescription, notes, duration, isPriority,
+      patientName, patientAge, patientGender, patientPhone, relationship, doctorId, vitals,
+    } = body;
 
     const token = await Token.findById(id);
     if (!token) return NextResponse.json({ error: 'Token not found' }, { status: 404 });
+    const previousDoctorId = token.doctorId?.toString?.() || '';
+
+    const hasEditableFieldUpdate =
+      typeof patientName !== 'undefined' ||
+      typeof patientAge !== 'undefined' ||
+      typeof patientGender !== 'undefined' ||
+      typeof patientPhone !== 'undefined' ||
+      typeof relationship !== 'undefined' ||
+      typeof doctorId !== 'undefined' ||
+      typeof vitals !== 'undefined';
+
+    if (hasEditableFieldUpdate) {
+      if (user.role !== 'reception') {
+        return NextResponse.json({ error: 'Only reception can edit patient token details.' }, { status: 403 });
+      }
+      if (token.status !== 'waiting') {
+        return NextResponse.json(
+          { error: 'Patient details can only be edited before being called.' },
+          { status: 409 }
+        );
+      }
+
+      if (typeof patientName !== 'undefined') {
+        const nextName = String(patientName || '').trim();
+        if (!nextName) return NextResponse.json({ error: 'Patient name is required.' }, { status: 400 });
+        token.patientName = nextName;
+      }
+
+      if (typeof patientAge !== 'undefined') {
+        const nextAge = Number(patientAge);
+        if (!Number.isFinite(nextAge) || nextAge < 0) {
+          return NextResponse.json({ error: 'Patient age must be a valid number.' }, { status: 400 });
+        }
+        token.patientAge = nextAge;
+      }
+
+      if (typeof patientGender !== 'undefined') {
+        if (!['male', 'female', 'other'].includes(String(patientGender))) {
+          return NextResponse.json({ error: 'Invalid patient gender.' }, { status: 400 });
+        }
+        token.patientGender = patientGender;
+      }
+
+      if (typeof patientPhone !== 'undefined') {
+        const nextPhone = String(patientPhone || '').trim();
+        if (!nextPhone) {
+          return NextResponse.json({ error: 'Patient phone is required.' }, { status: 400 });
+        }
+        token.patientPhone = nextPhone;
+      }
+
+      if (typeof relationship !== 'undefined') {
+        if (!['self', 'spouse', 'parent', 'child', 'sibling', 'other'].includes(String(relationship))) {
+          return NextResponse.json({ error: 'Invalid relationship.' }, { status: 400 });
+        }
+        token.relationship = relationship;
+      }
+
+      if (typeof doctorId !== 'undefined') {
+        if (!mongoose.Types.ObjectId.isValid(String(doctorId))) {
+          return NextResponse.json({ error: 'Invalid doctor ID.' }, { status: 400 });
+        }
+        token.doctorId = doctorId;
+      }
+
+      if (typeof vitals !== 'undefined') {
+        const safeVitals = typeof vitals === 'object' && vitals ? vitals : {};
+        token.vitals = {
+          bp: String((safeVitals as { bp?: string }).bp || '').trim(),
+          temp: String((safeVitals as { temp?: string }).temp || '').trim(),
+          pulse: String((safeVitals as { pulse?: string }).pulse || '').trim(),
+          weight: String((safeVitals as { weight?: string }).weight || '').trim(),
+          spo2: String((safeVitals as { spo2?: string }).spo2 || '').trim(),
+        };
+      }
+    }
 
     if (typeof isPriority === 'boolean') {
       if (user.role !== 'reception') {
@@ -53,6 +133,42 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<Para
       }
     }
 
+    if (status === 'done') {
+      if (user.role !== 'doctor') {
+        return NextResponse.json(
+          { error: 'Only doctors can mark a consultation as done.' },
+          { status: 403 }
+        );
+      }
+      if (token.status !== 'in-progress') {
+        return NextResponse.json(
+          { error: 'Only in-progress patients can be marked as done.' },
+          { status: 409 }
+        );
+      }
+      if (!String(diagnosis || '').trim() || !String(prescription || '').trim()) {
+        return NextResponse.json(
+          { error: 'Diagnosis and prescription are required to complete consultation.' },
+          { status: 400 }
+        );
+      }
+    }
+
+    if (status === 'in-progress') {
+      if (user.role !== 'doctor') {
+        return NextResponse.json(
+          { error: 'Only doctors can call the next patient.' },
+          { status: 403 }
+        );
+      }
+      if (token.status !== 'waiting') {
+        return NextResponse.json(
+          { error: 'Only waiting patients can be called.' },
+          { status: 409 }
+        );
+      }
+    }
+
     const previousStatus = token.status;
     token.status = status || token.status;
 
@@ -67,24 +183,32 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<Para
 
     if (status === 'done') {
       token.completedAt = new Date();
+      const fallbackBookedById = token.bookedById || token.patientId || token.doctorId;
 
-      // Create consultation record
-      if (diagnosis && prescription) {
+      try {
         await Consultation.create({
           tokenId:      token._id,
           patientId:    token.patientId,
-          bookedById:   token.bookedById || token.patientId,
+          // Keep non-empty for compatibility with older running model instances
+          // that may still enforce bookedById as required.
+          bookedById:   fallbackBookedById,
           doctorId:     token.doctorId,
           patientName:  token.patientName,
           doctorName:   user.name,
           relationship: (token as { relationship?: string }).relationship || 'self',
           patientGender:(token as { patientGender?: string }).patientGender,
-          diagnosis,
-          prescription,
+          diagnosis:    String(diagnosis).trim(),
+          prescription: String(prescription).trim(),
           notes,
           duration: duration || 10,
           date: format(new Date(), 'yyyy-MM-dd'),
         });
+      } catch (consultationError) {
+        console.error('[Consultation CREATE]', consultationError);
+        return NextResponse.json(
+          { error: 'Failed to save consultation details. Please try again.' },
+          { status: 500 }
+        );
       }
     }
 
@@ -110,12 +234,12 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<Para
     }
 
     try {
-      const doctorId = token.doctorId?.toString?.() || '';
-      if (status === 'cancelled' && previousStatus !== 'cancelled' && doctorId) {
+      const currentDoctorId = token.doctorId?.toString?.() || '';
+      if (status === 'cancelled' && previousStatus !== 'cancelled' && currentDoctorId) {
         await sendCancellationNotifications({
           actorRole: user.role,
           date: token.date,
-          doctorId,
+          doctorId: currentDoctorId,
           previousStatus,
           token: {
             _id: id,
@@ -125,8 +249,11 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<Para
           },
         });
       }
-      if (doctorId) {
-        await sendWaitWindowNotifications(token.date, doctorId);
+      if (previousDoctorId && previousDoctorId !== currentDoctorId) {
+        await sendWaitWindowNotifications(token.date, previousDoctorId);
+      }
+      if (currentDoctorId) {
+        await sendWaitWindowNotifications(token.date, currentDoctorId);
       }
     } catch (notifyError) {
       console.error('[Token PATCH Notifications]', notifyError);

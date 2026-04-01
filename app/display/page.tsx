@@ -1,25 +1,33 @@
 'use client';
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { io, Socket } from 'socket.io-client';
 import { formatWaitTime, calculateWaitTime } from '@/lib/wait-time';
 import { format } from 'date-fns';
 import Image from 'next/image';
+import { useSearchParams } from 'next/navigation';
 import { Wifi, WifiOff, Clock, Users, CheckCircle2, Timer, Stethoscope } from 'lucide-react';
-import { sortQueueForDoctor } from '@/lib/queue-sort';
 
 interface Token {
   _id: string;
   tokenNumber: number;
   patientName: string;
   status: 'waiting' | 'in-progress' | 'done' | 'cancelled';
-  isPriority?: boolean;
-  priorityMarkedAt?: string;
   doctorId: { _id: string; name: string; specialization?: string } | string;
 }
 
+interface DoctorSummary {
+  _id: string;
+  name: string;
+  specialization?: string;
+  isAvailable?: boolean;
+}
+
 export default function DisplayPanel() {
+  const searchParams = useSearchParams();
+  const doctorId = searchParams.get('doctorId') || '';
   const [tokens, setTokens] = useState<Token[]>([]);
+  const [displayDoctor, setDisplayDoctor] = useState<DoctorSummary | null>(null);
   const [currentToken, setCurrentToken] = useState<Token | null>(null);
   const [isConnected, setIsConnected] = useState(false);
   const [animateToken, setAnimateToken] = useState(false);
@@ -27,80 +35,82 @@ export default function DisplayPanel() {
   const [currentTime, setCurrentTime] = useState('');
   const [currentDate, setCurrentDate] = useState('');
   const [lastUpdated, setLastUpdated] = useState('');
-  const tokensRef = useRef<Token[]>([]);
-
-  const applyTokens = useCallback((nextTokens: Token[]) => {
-    const sortedTokens = sortQueueForDoctor(nextTokens);
-    tokensRef.current = sortedTokens;
-    setTokens(sortedTokens);
-    setLastUpdated(new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
-
-    const inProgress = sortedTokens.find((t) => t.status === 'in-progress');
-    setCurrentToken((prev) => {
-      if (inProgress && prev?._id !== inProgress._id) {
-        setAnimateToken(true);
-        setTimeout(() => setAnimateToken(false), 1000);
-      }
-      return inProgress || null;
-    });
-  }, []);
-
-  const upsertToken = useCallback((incoming: Token) => {
-    if (!incoming?._id) return;
-    applyTokens(
-      (() => {
-        const without = tokensRef.current.filter((item) => item._id !== incoming._id);
-        return [...without, incoming];
-      })()
-    );
-  }, [applyTokens]);
 
   const fetchTokens = useCallback(async () => {
     try {
-      const res = await fetch('/api/display');
+      const qs = doctorId ? `?doctorId=${encodeURIComponent(doctorId)}` : '';
+      const res = await fetch(`/api/display${qs}`);
       if (!res.ok) {
         console.error('[Display] API error:', res.status);
         return;
       }
       const data = await res.json();
       const allTokens: Token[] = data.tokens || [];
-      applyTokens(allTokens);
+      setTokens(allTokens);
+      setDisplayDoctor(data.doctor || null);
       if (data.avgDuration) setAvgDuration(data.avgDuration);
+      setLastUpdated(new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
+
+      const inProgress = allTokens.find((t) => t.status === 'in-progress');
+      setCurrentToken((prev) => {
+        if (inProgress && prev?._id !== inProgress._id) {
+          setAnimateToken(true);
+          setTimeout(() => setAnimateToken(false), 1000);
+        }
+        return inProgress || null;
+      });
     } catch (err) {
       console.error('[Display] fetch error:', err);
     }
-  }, [applyTokens]);
+  }, [doctorId]);
 
   // Socket.io — real-time updates
   useEffect(() => {
     const socket: Socket = io('', {
       path: '/api/socket',
-      transports: ['websocket'],
-      timeout: 5000,
+      transports: ['websocket', 'polling'],
     });
+
+    const handleAvailability = ({
+      doctorId: changedDoctorId,
+      isAvailable,
+    }: {
+      doctorId: string;
+      isAvailable: boolean;
+    }) => {
+      if (!doctorId || changedDoctorId !== doctorId) return;
+      setDisplayDoctor(prev => (
+        prev
+          ? { ...prev, isAvailable }
+          : prev
+      ));
+      fetchTokens();
+    };
 
     socket.on('connect', () => setIsConnected(true));
     socket.on('disconnect', () => setIsConnected(false));
-    socket.on('token_updated', upsertToken);
+    socket.on('token_updated', fetchTokens);
     socket.on('queue_updated', fetchTokens);
-    socket.on('token_created', upsertToken);
-    socket.on('doctor_called_next', (payload: { token?: Token }) => {
-      if (payload?.token) upsertToken(payload.token);
-      else fetchTokens();
-    });
+    socket.on('token_created', fetchTokens);
+    socket.on('doctor_called_next', fetchTokens);
     socket.on('consultation_completed', fetchTokens);
+    socket.on('doctor_availability_changed', handleAvailability);
 
-    return () => { socket.disconnect(); };
-  }, [fetchTokens, upsertToken]);
-
-  // Initial fetch + polling fallback every 8s
-  useEffect(() => {
-    const bootstrap = async () => {
-      await fetchTokens();
+    return () => {
+      socket.off('doctor_availability_changed', handleAvailability);
+      socket.disconnect();
     };
-    void bootstrap();
-    const poll = setInterval(fetchTokens, 8000);
-    return () => clearInterval(poll);
+  }, [doctorId, fetchTokens]);
+
+  // Initial fetch + polling fallback every 15s
+  useEffect(() => {
+    const runFetch = () => { void fetchTokens(); };
+    const initial = setTimeout(runFetch, 0);
+    const poll = setInterval(runFetch, 15000);
+    return () => {
+      clearTimeout(initial);
+      clearInterval(poll);
+    };
   }, [fetchTokens]);
 
   // Clock
@@ -121,6 +131,8 @@ export default function DisplayPanel() {
 
   const doctorName = currentToken && typeof currentToken.doctorId === 'object'
     ? currentToken.doctorId.name : 'Your Doctor';
+  const boardTitle = displayDoctor?.name ? `${displayDoctor.name} Queue Display` : 'Real-Time OPD Queue Display';
+  const isDoctorUnavailable = Boolean(doctorId && displayDoctor && displayDoctor.isAvailable === false);
 
   return (
     <div style={{
@@ -143,7 +155,7 @@ export default function DisplayPanel() {
           <Image src="/logo.png" alt="MediQueue" width={64} height={64} style={{ borderRadius: 18, boxShadow: '0 4px 20px rgba(99,102,241,0.5)' }} />
           <div>
             <div style={{ fontSize: 24, fontWeight: 800, color: '#F9FAFB' }}>MediQueue</div>
-            <div style={{ fontSize: 13, color: '#6B7280' }}>Real-Time OPD Queue Display</div>
+            <div style={{ fontSize: 13, color: '#6B7280' }}>{boardTitle}</div>
           </div>
         </div>
 
@@ -326,6 +338,40 @@ export default function DisplayPanel() {
         <span style={{ color: '#374151' }}>|</span>
         <span style={{ fontSize: 13, color: '#6B7280' }}>📞 Emergency: 102</span>
       </div>
+
+      {isDoctorUnavailable && (
+        <div style={{
+          position: 'fixed',
+          inset: 0,
+          zIndex: 2000,
+          background: 'rgba(0,0,0,0.82)',
+          backdropFilter: 'blur(8px)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          padding: 24,
+        }}>
+          <div style={{
+            background: 'linear-gradient(135deg, #1A0A0A, #1A0808)',
+            border: '1px solid rgba(239,68,68,0.5)',
+            borderRadius: 22,
+            padding: '34px 30px',
+            textAlign: 'center',
+            maxWidth: 560,
+            width: '100%',
+            boxShadow: '0 0 70px rgba(239,68,68,0.2), 0 28px 60px rgba(0,0,0,0.6)',
+          }}>
+            <div style={{ fontSize: 54, marginBottom: 12 }}>🚨</div>
+            <h2 style={{ fontSize: 28, fontWeight: 800, color: '#FCA5A5', margin: '0 0 12px' }}>
+              Doctor Is Currently Unavailable
+            </h2>
+            <p style={{ fontSize: 16, color: '#D1D5DB', lineHeight: 1.7, margin: 0 }}>
+              {displayDoctor?.name || 'Selected doctor'} is currently unavailable.
+              Queue updates will resume automatically once the doctor is available again.
+            </p>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

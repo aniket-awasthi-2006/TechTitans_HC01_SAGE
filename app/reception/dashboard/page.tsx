@@ -8,11 +8,12 @@ import Button from '@/components/ui/Button';
 import { useAuth } from '@/components/providers/AuthProvider';
 import { useSocket } from '@/components/providers/SocketProvider';
 import { calculateWaitTime, formatWaitTime } from '@/lib/wait-time';
+import { sortWaitingByPriority } from '@/lib/queue-sort';
 import toast from 'react-hot-toast';
 import { format } from 'date-fns';
 import {
-  Ticket, Hourglass, Stethoscope, Timer, X, PhoneCall, CheckCircle,
-  Plus, Search, User as UserIcon, ShieldAlert, ShieldCheck, TriangleAlert,
+  Ticket, Hourglass, Stethoscope, Timer, X,
+  Plus, Search, User as UserIcon, ShieldAlert, ShieldCheck, TriangleAlert, Edit3,
 } from 'lucide-react';
 
 /* ─── Types ─────────────────────────────────────────────────────────────────── */
@@ -35,8 +36,11 @@ interface Token {
   tokenNumber: number;
   patientName: string;
   patientAge: number;
+  patientGender?: 'male' | 'female' | 'other';
+  patientPhone?: string;
   relationship?: string;
   bookedById?: { _id: string; name: string } | string;
+  vitals?: { bp?: string; temp?: string; pulse?: string; weight?: string; spo2?: string };
   status: 'waiting' | 'in-progress' | 'done' | 'cancelled';
   isPriority?: boolean;
   priorityMarkedAt?: string;
@@ -61,100 +65,45 @@ export default function ReceptionDashboard() {
   const [tokens, setTokens] = useState<Token[]>([]);
   const [doctors, setDoctors] = useState<Doctor[]>([]);
   const [showModal, setShowModal] = useState(false);
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [editingToken, setEditingToken] = useState<Token | null>(null);
   const [avgDuration, setAvgDuration] = useState(10);
   const [isLoading, setIsLoading] = useState(true);
-
-  const fetchTokensOnly = useCallback(async () => {
-    if (!token) return;
-    const tokensRes = await fetch('/api/tokens', {
-      headers: { Authorization: `Bearer ${token}` },
-      cache: 'no-store',
-    });
-    if (!tokensRes.ok) throw new Error('Failed to fetch tokens');
-    const tokensData = await tokensRes.json();
-    setTokens(tokensData.tokens || []);
-  }, [token]);
-
-  const fetchDoctorsOnly = useCallback(async () => {
-    if (!token) return;
-    const docRes = await fetch('/api/users?role=doctor', {
-      headers: { Authorization: `Bearer ${token}` },
-      cache: 'no-store',
-    });
-    if (!docRes.ok) throw new Error('Failed to fetch doctors');
-    const docData = await docRes.json();
-    setDoctors(docData.users || []);
-  }, [token]);
-
-  const fetchAvgDurationOnly = useCallback(async () => {
-    if (!token) return;
-    const consultRes = await fetch('/api/consultations', {
-      headers: { Authorization: `Bearer ${token}` },
-      cache: 'no-store',
-    });
-    if (!consultRes.ok) throw new Error('Failed to fetch consultations');
-    const consultData = await consultRes.json();
-    setAvgDuration(consultData.avgDuration || 10);
-  }, [token]);
 
   const fetchData = useCallback(async () => {
     if (!token) return;
     try {
-      await Promise.all([fetchTokensOnly(), fetchDoctorsOnly(), fetchAvgDurationOnly()]);
-    } catch {
-      toast.error('Failed to fetch data');
-    } finally {
-      setIsLoading(false);
-    }
-  }, [token, fetchTokensOnly, fetchDoctorsOnly, fetchAvgDurationOnly]);
-
-  const upsertToken = useCallback((incoming: Token) => {
-    setTokens((prev) => {
-      const withoutCurrent = prev.filter((item) => item._id !== incoming._id);
-      return [...withoutCurrent, incoming].sort((a, b) => a.tokenNumber - b.tokenNumber);
-    });
-  }, []);
+      const [tokensRes, docRes, consultRes] = await Promise.all([
+        fetch('/api/tokens', { headers: { Authorization: `Bearer ${token}` } }),
+        fetch('/api/users?role=doctor', { headers: { Authorization: `Bearer ${token}` } }),
+        fetch('/api/consultations', { headers: { Authorization: `Bearer ${token}` } }),
+      ]);
+      const [tokensData, docData, consultData] = await Promise.all([
+        tokensRes.json(), docRes.json(), consultRes.json(),
+      ]);
+      setTokens(tokensData.tokens || []);
+      setDoctors(docData.users || []);
+      setAvgDuration(consultData.avgDuration || 10);
+    } catch { toast.error('Failed to fetch data'); }
+    finally { setIsLoading(false); }
+  }, [token]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
   useEffect(() => {
     if (!socket) return;
-
-    const handleTokenCreated = (incoming: Token) => {
-      if (!incoming?._id) return;
-      upsertToken(incoming);
-    };
-
-    const handleTokenUpdated = (incoming: Token) => {
-      if (!incoming?._id) return;
-      upsertToken(incoming);
-    };
-
-    const handleQueueUpdated = () => {
-      fetchTokensOnly().catch(() => {});
-      fetchAvgDurationOnly().catch(() => {});
-    };
-
-    const handleDoctorAvailabilityChanged = (payload: { doctorId: string; isAvailable: boolean }) => {
-      if (!payload?.doctorId) return;
-      setDoctors((prev) =>
-        prev.map((doctor) =>
-          doctor._id === payload.doctorId ? { ...doctor, isAvailable: payload.isAvailable } : doctor
-        )
-      );
-    };
-
-    socket.on('token_created', handleTokenCreated);
-    socket.on('token_updated', handleTokenUpdated);
-    socket.on('queue_updated', handleQueueUpdated);
-    socket.on('doctor_availability_changed', handleDoctorAvailabilityChanged);
+    const refresh = () => fetchData();
+    socket.on('token_created', refresh);
+    socket.on('token_updated', refresh);
+    socket.on('queue_updated', refresh);
+    socket.on('doctor_availability_changed', refresh);
     return () => {
-      socket.off('token_created', handleTokenCreated);
-      socket.off('token_updated', handleTokenUpdated);
-      socket.off('queue_updated', handleQueueUpdated);
-      socket.off('doctor_availability_changed', handleDoctorAvailabilityChanged);
+      socket.off('token_created', refresh);
+      socket.off('token_updated', refresh);
+      socket.off('queue_updated', refresh);
+      socket.off('doctor_availability_changed', refresh);
     };
-  }, [socket, upsertToken, fetchTokensOnly, fetchAvgDurationOnly]);
+  }, [socket, fetchData]);
 
   const updateStatus = async (id: string, status: string) => {
     try {
@@ -163,21 +112,11 @@ export default function ReceptionDashboard() {
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({ status }),
       });
-      if (res.ok) {
-        const nextStatus = status as Token['status'];
-        setTokens((prev) =>
-          prev.map((item) =>
-            item._id === id
-              ? {
-                  ...item,
-                  status: nextStatus,
-                  ...(nextStatus !== 'waiting' ? { isPriority: false, priorityMarkedAt: undefined } : {}),
-                }
-              : item
-          )
-        );
-        toast.success(`Token marked as ${status}`);
-      } else toast.error('Failed to update');
+      if (res.ok) toast.success(`Token marked as ${status}`);
+      else {
+        const data = await res.json().catch(() => ({}));
+        toast.error(data.error || 'Failed to update');
+      }
     } catch { toast.error('Network error'); }
   };
 
@@ -196,18 +135,8 @@ export default function ReceptionDashboard() {
         body: JSON.stringify({ isPriority: nextPriority }),
       });
       if (res.ok) {
-        setTokens((prev) =>
-          prev.map((item) =>
-            item._id === tokenItem._id
-              ? {
-                  ...item,
-                  isPriority: nextPriority,
-                  priorityMarkedAt: nextPriority ? new Date().toISOString() : undefined,
-                }
-              : item
-          )
-        );
         toast.success(nextPriority ? 'Patient marked as priority' : 'Priority removed');
+        fetchData();
       } else {
         const data = await res.json().catch(() => ({}));
         toast.error(data.error || 'Failed to update priority');
@@ -228,7 +157,7 @@ export default function ReceptionDashboard() {
       });
       if (waitingForDoc.length > 0) {
         const ok = confirm(
-          `⚠️ Dr. ${doctor.name} has ${waitingForDoc.length} patient(s) waiting.\n\nMarking unavailable will send an emergency notice to affected patients.\n\nContinue?`
+          `⚠️ ${doctor.name} has ${waitingForDoc.length} patient(s) waiting.\n\nMarking unavailable will send an emergency notice to affected patients.\n\nContinue?`
         );
         if (!ok) return;
       }
@@ -241,18 +170,36 @@ export default function ReceptionDashboard() {
         body: JSON.stringify({ isAvailable: !goingUnavailable }),
       });
       if (res.ok) {
-        toast.success(`Dr. ${doctor.name} marked as ${!goingUnavailable ? 'available ✅' : 'unavailable 🔴'}`);
-        setDoctors((prev) =>
-          prev.map((item) =>
-            item._id === doctor._id ? { ...item, isAvailable: !goingUnavailable } : item
-          )
-        );
+        toast.success(`${doctor.name} marked as ${!goingUnavailable ? 'available ✅' : 'unavailable 🔴'}`);
+        fetchData();
       } else toast.error('Failed to update availability');
     } catch { toast.error('Network error'); }
   };
 
+  const openEditToken = (tokenItem: Token) => {
+    if (tokenItem.status !== 'waiting') {
+      toast.error('Only waiting patients can be edited.');
+      return;
+    }
+    setEditingToken(tokenItem);
+    setShowEditModal(true);
+  };
+
   const waiting = tokens.filter(t => t.status === 'waiting');
   const inProgress = tokens.filter(t => t.status === 'in-progress');
+  const getDoctorId = (doctorValue: Token['doctorId']) =>
+    typeof doctorValue === 'object' ? doctorValue._id : doctorValue;
+
+  const waitingByDoctor: Record<string, Token[]> = {};
+  waiting.forEach((tokenItem) => {
+    const docId = getDoctorId(tokenItem.doctorId);
+    if (!docId) return;
+    if (!waitingByDoctor[docId]) waitingByDoctor[docId] = [];
+    waitingByDoctor[docId].push(tokenItem);
+  });
+  Object.keys(waitingByDoctor).forEach((docId) => {
+    waitingByDoctor[docId] = sortWaitingByPriority(waitingByDoctor[docId]);
+  });
 
   return (
     <DashboardLayout title="Reception Dashboard" subtitle="Manage OPD queue in real-time" requiredRole="reception">
@@ -355,7 +302,9 @@ export default function ReceptionDashboard() {
               {tokens.map(t => {
                 const doc = typeof t.doctorId === 'object' ? t.doctorId : null;
                 const bookedBy = typeof t.bookedById === 'object' ? t.bookedById : null;
-                const patientsAhead = waiting.findIndex(w => w._id === t._id);
+                const docId = getDoctorId(t.doctorId);
+                const waitingForDoctor = docId ? (waitingByDoctor[docId] || []) : [];
+                const patientsAhead = waitingForDoctor.findIndex(w => w._id === t._id);
                 const wait = t.status === 'waiting' ? calculateWaitTime(patientsAhead, avgDuration) : 0;
                 const rel = t.relationship || 'self';
                 const relColor = RELATIONSHIP_COLORS[rel] || '#9CA3AF';
@@ -434,13 +383,22 @@ export default function ReceptionDashboard() {
                           </button>
                         )}
                         {t.status === 'waiting' && (
-                          <button className="btn-ghost" style={{ height: 28, padding: '0 8px', fontSize: 11, display: 'inline-flex', alignItems: 'center', gap: 4 }} onClick={() => updateStatus(t._id, 'in-progress')}>
-                            <PhoneCall size={12} /> Call
-                          </button>
-                        )}
-                        {t.status === 'in-progress' && (
-                          <button className="btn-ghost" style={{ height: 28, padding: '0 8px', fontSize: 11, color: '#22C55E', display: 'inline-flex', alignItems: 'center', gap: 4 }} onClick={() => updateStatus(t._id, 'done')}>
-                            <CheckCircle size={12} /> Done
+                          <button
+                            className="btn-ghost"
+                            style={{
+                              height: 28,
+                              padding: '0 8px',
+                              fontSize: 11,
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: 4,
+                              color: '#A5B4FC',
+                              border: '1px solid rgba(99,102,241,0.35)',
+                              background: 'rgba(99,102,241,0.08)',
+                            }}
+                            onClick={() => openEditToken(t)}
+                          >
+                            <Edit3 size={12} /> Edit
                           </button>
                         )}
                         {!['done', 'cancelled'].includes(t.status) && (
@@ -464,10 +422,18 @@ export default function ReceptionDashboard() {
           doctors={doctors}
           token={token!}
           onClose={() => setShowModal(false)}
-          onCreated={() => {
-            setShowModal(false);
-            fetchTokensOnly().catch(() => {});
-          }}
+          onCreated={() => { setShowModal(false); fetchData(); }}
+        />
+      )}
+
+      {showEditModal && editingToken && (
+        <TokenEditModal
+          key={editingToken._id}
+          tokenItem={editingToken}
+          doctors={doctors}
+          token={token!}
+          onClose={() => { setShowEditModal(false); setEditingToken(null); }}
+          onSaved={() => { setShowEditModal(false); setEditingToken(null); fetchData(); }}
         />
       )}
     </DashboardLayout>
@@ -530,6 +496,7 @@ function TokenCreateModal({
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!form.doctorId) { toast.error('Please select a doctor'); return; }
+    if (!form.patientPhone.trim()) { toast.error('Phone number is required'); return; }
     const finalPatientName = isFamilyMember
       ? form.familyName.trim()
       : (selectedPatient?.name || form.patientName.trim());
@@ -549,7 +516,7 @@ function TokenCreateModal({
         familyName: isFamilyMember ? form.familyName : undefined,
         familyRelationship: isFamilyMember ? form.relationship : undefined,
         bookedById: selectedPatient?._id,
-        patientName: !isFamilyMember && !selectedPatient ? form.patientName : undefined,
+        patientName: !isFamilyMember ? (selectedPatient?.name || form.patientName) : undefined,
       };
       const res = await fetch('/api/tokens', {
         method: 'POST',
@@ -654,8 +621,8 @@ function TokenCreateModal({
           </div>
 
           <div>
-            <label className="form-label">Phone</label>
-            <input className="input-dark" placeholder="+91 XXXXXXXXXX" value={form.patientPhone} onChange={e => setForm(f => ({ ...f, patientPhone: e.target.value }))} />
+            <label className="form-label">Phone *</label>
+            <input className="input-dark" placeholder="+91 XXXXXXXXXX" value={form.patientPhone} onChange={e => setForm(f => ({ ...f, patientPhone: e.target.value }))} required />
           </div>
 
           {/* Doctor — only available doctors */}
@@ -699,6 +666,205 @@ function TokenCreateModal({
           <div style={{ display: 'flex', gap: 10, marginTop: 8 }}>
             <button type="button" className="btn-ghost" onClick={onClose} style={{ flex: 1 }}>Cancel</button>
             <Button type="submit" isLoading={isLoading} style={{ flex: 2 }}>Create Token</Button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+function TokenEditModal({
+  tokenItem, doctors, token, onClose, onSaved,
+}: {
+  tokenItem: Token;
+  doctors: Doctor[];
+  token: string;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const buildForm = (source: Token) => ({
+    patientName: source.patientName || '',
+    patientAge: String(source.patientAge || ''),
+    patientGender: source.patientGender || 'other',
+    patientPhone: source.patientPhone || '',
+    relationship: source.relationship || 'self',
+    doctorId: typeof source.doctorId === 'object' ? source.doctorId._id : source.doctorId,
+    vitals: {
+      bp: source.vitals?.bp || '',
+      temp: source.vitals?.temp || '',
+      pulse: source.vitals?.pulse || '',
+      weight: source.vitals?.weight || '',
+      spo2: source.vitals?.spo2 || '',
+    },
+  });
+
+  const [form, setForm] = useState(() => buildForm(tokenItem));
+  const [isSaving, setIsSaving] = useState(false);
+
+  const setVital = (key: string, val: string) =>
+    setForm(prev => ({ ...prev, vitals: { ...prev.vitals, [key]: val } }));
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!form.patientName.trim()) { toast.error('Patient name is required'); return; }
+    if (!form.patientPhone.trim()) { toast.error('Phone number is required'); return; }
+    if (!form.doctorId) { toast.error('Please select a doctor'); return; }
+    if (Number(form.patientAge) < 0) { toast.error('Age must be valid'); return; }
+
+    setIsSaving(true);
+    try {
+      const res = await fetch(`/api/tokens/${tokenItem._id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          patientName: form.patientName.trim(),
+          patientAge: parseInt(form.patientAge, 10) || 0,
+          patientGender: form.patientGender,
+          patientPhone: form.patientPhone.trim(),
+          relationship: form.relationship,
+          doctorId: form.doctorId,
+          vitals: form.vitals,
+        }),
+      });
+
+      if (res.ok) {
+        toast.success(`Token #${tokenItem.tokenNumber} updated`);
+        onSaved();
+      } else {
+        const data = await res.json().catch(() => ({}));
+        toast.error(data.error || 'Failed to update token');
+      }
+    } catch {
+      toast.error('Network error');
+    }
+    setIsSaving(false);
+  };
+
+  return (
+    <div className="modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
+      <div className="modal-content" style={{ maxWidth: 560, maxHeight: '92vh', overflowY: 'auto' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 20 }}>
+          <h2 style={{ fontSize: 20, fontWeight: 700, color: '#F9FAFB', margin: 0 }}>
+            Edit Token #{tokenItem.tokenNumber}
+          </h2>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', color: '#6B7280', cursor: 'pointer', fontSize: 20 }}>
+            ×
+          </button>
+        </div>
+
+        <div style={{
+          marginBottom: 14,
+          padding: '9px 12px',
+          borderRadius: 10,
+          border: '1px solid rgba(245,158,11,0.25)',
+          background: 'rgba(245,158,11,0.08)',
+          color: '#FCD34D',
+          fontSize: 12,
+        }}>
+          Editable only while patient is waiting (before being called).
+        </div>
+
+        <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <div>
+            <label className="form-label">Patient Name *</label>
+            <input
+              className="input-dark"
+              value={form.patientName}
+              onChange={e => setForm(prev => ({ ...prev, patientName: e.target.value }))}
+              required
+            />
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+            <div>
+              <label className="form-label">Age *</label>
+              <input
+                className="input-dark"
+                type="number"
+                min={0}
+                value={form.patientAge}
+                onChange={e => setForm(prev => ({ ...prev, patientAge: e.target.value }))}
+                required
+              />
+            </div>
+            <div>
+              <label className="form-label">Gender</label>
+              <select
+                className="select-dark"
+                value={form.patientGender}
+                onChange={e => setForm(prev => ({ ...prev, patientGender: e.target.value as 'male' | 'female' | 'other' }))}
+              >
+                <option value="other">Other</option>
+                <option value="male">Male</option>
+                <option value="female">Female</option>
+              </select>
+            </div>
+          </div>
+
+          <div>
+            <label className="form-label">Phone *</label>
+            <input
+              className="input-dark"
+              value={form.patientPhone}
+              onChange={e => setForm(prev => ({ ...prev, patientPhone: e.target.value }))}
+              required
+            />
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+            <div>
+              <label className="form-label">Relationship</label>
+              <select
+                className="select-dark"
+                value={form.relationship}
+                onChange={e => setForm(prev => ({ ...prev, relationship: e.target.value }))}
+              >
+                {Object.entries(RELATIONSHIP_LABELS).map(([val, label]) => (
+                  <option key={val} value={val}>{label}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="form-label">Assign Doctor *</label>
+              <select
+                className="select-dark"
+                value={form.doctorId}
+                onChange={e => setForm(prev => ({ ...prev, doctorId: e.target.value }))}
+                required
+              >
+                <option value="">Select Doctor</option>
+                {doctors.map(d => (
+                  <option key={d._id} value={d._id}>
+                    {d.name}{d.specialization ? ` - ${d.specialization}` : ''}{d.isAvailable === false ? ' (Unavailable)' : ''}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          <div>
+            <label className="form-label">Vitals (optional)</label>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
+              {[['bp', 'BP (mmHg)'], ['temp', 'Temp (°F)'], ['pulse', 'Pulse (bpm)'], ['weight', 'Wt (kg)'], ['spo2', 'SpO2 (%)']].map(([key, label]) => (
+                <input
+                  key={key}
+                  className="input-dark"
+                  placeholder={label}
+                  value={form.vitals[key as keyof typeof form.vitals]}
+                  onChange={e => setVital(key, e.target.value)}
+                  style={{ fontSize: 13 }}
+                />
+              ))}
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', gap: 10, marginTop: 8 }}>
+            <button type="button" className="btn-ghost" onClick={onClose} style={{ flex: 1 }}>
+              Cancel
+            </button>
+            <Button type="submit" isLoading={isSaving} style={{ flex: 2 }}>
+              Save Changes
+            </Button>
           </div>
         </form>
       </div>

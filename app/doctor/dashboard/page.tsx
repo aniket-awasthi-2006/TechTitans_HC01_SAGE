@@ -105,111 +105,52 @@ export default function DoctorDashboard() {
   const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isSkipping, setIsSkipping] = useState(false);
-  const [timerStart, setTimerStart] = useState<Date | null>(null);
-  const [elapsed, setElapsed] = useState(0);
+  const [nowMs, setNowMs] = useState(() => Date.now());
   const [avgDuration, setAvgDuration] = useState(10);
 
   /* fetch ------------------------------------------------------------------- */
-  const fetchQueueOnly = useCallback(async () => {
-    if (!token) return;
-    const qRes = await fetch('/api/tokens', {
-      headers: { Authorization: `Bearer ${token}` },
-      cache: 'no-store',
-    });
-    if (!qRes.ok) throw new Error('Failed to fetch queue');
-    const qData = await qRes.json();
-    setQueue(qData.tokens || []);
-  }, [token]);
-
-  const fetchHistoryOnly = useCallback(async () => {
-    if (!token) return;
-    const cRes = await fetch('/api/consultations', {
-      headers: { Authorization: `Bearer ${token}` },
-      cache: 'no-store',
-    });
-    if (!cRes.ok) throw new Error('Failed to fetch consultations');
-    const cData = await cRes.json();
-    setHistory(cData.consultations || []);
-    setAvgDuration(cData.avgDuration || 10);
-  }, [token]);
-
-  const fetchData = useCallback(async () => {
+  const fetchQueue = useCallback(async () => {
     if (!token) return;
     try {
-      await Promise.all([fetchQueueOnly(), fetchHistoryOnly()]);
-    } catch {
-      toast.error('Failed to load queue');
-    } finally {
-      setIsLoading(false);
-    }
-  }, [token, fetchQueueOnly, fetchHistoryOnly]);
+      const [qRes, cRes] = await Promise.all([
+        fetch('/api/tokens', { headers: { Authorization: `Bearer ${token}` } }),
+        fetch('/api/consultations', { headers: { Authorization: `Bearer ${token}` } }),
+      ]);
+      const [qData, cData] = await Promise.all([qRes.json(), cRes.json()]);
+      setQueue(qData.tokens || []);
+      setHistory(cData.consultations || []);
+      setAvgDuration(cData.avgDuration || 10);
+    } catch { toast.error('Failed to load queue'); }
+    finally { setIsLoading(false); }
+  }, [token]);
 
-  const upsertQueueToken = useCallback((incoming: Token) => {
-    if (!incoming?._id) return;
-    const tokenDoctorId = typeof incoming.doctorId === 'object' ? incoming.doctorId._id : incoming.doctorId;
-    const isMyToken = tokenDoctorId === user?.id;
-    setQueue((prev) => {
-      if (!isMyToken) {
-        return prev.filter((item) => item._id !== incoming._id);
-      }
-      const next = prev.some((item) => item._id === incoming._id)
-        ? prev.map((item) => (item._id === incoming._id ? incoming : item))
-        : [...prev, incoming];
-      return next;
-    });
-    setSelected((prev) => {
-      if (!prev || prev._id !== incoming._id) return prev;
-      if (!isMyToken) return null;
-      if (incoming.status === 'done' || incoming.status === 'cancelled') return null;
-      return incoming;
-    });
-  }, [user?.id]);
-
-  useEffect(() => { fetchData(); }, [fetchData]);
+  useEffect(() => { fetchQueue(); }, [fetchQueue]);
 
   useEffect(() => {
     if (!socket) return;
+    const refresh = () => fetchQueue();
+    socket.on('token_updated', refresh);
+    socket.on('queue_updated', refresh);
+    return () => { socket.off('token_updated', refresh); socket.off('queue_updated', refresh); };
+  }, [socket, fetchQueue]);
 
-    const handleTokenUpdated = (incoming: Token) => {
-      upsertQueueToken(incoming);
-    };
-
-    const handleTokenCreated = (incoming: Token) => {
-      upsertQueueToken(incoming);
-    };
-
-    const handleDoctorCalledNext = (payload: { token?: Token }) => {
-      if (payload?.token) upsertQueueToken(payload.token);
-    };
-
-    const handleQueueUpdated = () => {
-      fetchQueueOnly().catch(() => {});
-    };
-
-    const handleConsultationCompleted = () => {
-      fetchHistoryOnly().catch(() => {});
-    };
-
-    socket.on('token_updated', handleTokenUpdated);
-    socket.on('token_created', handleTokenCreated);
-    socket.on('doctor_called_next', handleDoctorCalledNext);
-    socket.on('queue_updated', handleQueueUpdated);
-    socket.on('consultation_completed', handleConsultationCompleted);
-    return () => {
-      socket.off('token_updated', handleTokenUpdated);
-      socket.off('token_created', handleTokenCreated);
-      socket.off('doctor_called_next', handleDoctorCalledNext);
-      socket.off('queue_updated', handleQueueUpdated);
-      socket.off('consultation_completed', handleConsultationCompleted);
-    };
-  }, [socket, upsertQueueToken, fetchQueueOnly, fetchHistoryOnly]);
+  /* keep selected token in sync after queue refreshes ----------------------- */
+  useEffect(() => {
+    setSelected(prev => {
+      if (queue.length === 0) return null;
+      if (prev) {
+        const updated = queue.find(t => t._id === prev._id);
+        if (updated) return updated;
+      }
+      return queue.find(t => t.status === 'in-progress') || null;
+    });
+  }, [queue]);
 
   /* timer ------------------------------------------------------------------- */
   useEffect(() => {
-    if (!timerStart) { setElapsed(0); return; }
-    const iv = setInterval(() => setElapsed(Math.floor((Date.now() - timerStart.getTime()) / 1000)), 1000);
+    const iv = setInterval(() => setNowMs(Date.now()), 1000);
     return () => clearInterval(iv);
-  }, [timerStart]);
+  }, []);
 
   /* actions ----------------------------------------------------------------- */
   const callNext = async () => {
@@ -222,7 +163,10 @@ export default function DoctorDashboard() {
         body: JSON.stringify({ status: 'in-progress' }),
       });
       if (res.ok) {
-        setSelected(next); setTimerStart(new Date()); setActiveTab('history');
+        const data = await res.json().catch(() => ({}));
+        const updatedToken = data?.token as Token | undefined;
+        setSelected(updatedToken || { ...next, status: 'in-progress', calledAt: new Date().toISOString() });
+        setActiveTab('history');
         setDiagnosis(''); setMedicines([newRow()]); setNotes('');
         toast.success(`Calling Token #${next.tokenNumber}`);
       }
@@ -241,8 +185,8 @@ export default function DoctorDashboard() {
       });
       if (res.ok) {
         toast.success(`${selected.patientName} marked absent — skipped.`);
-        setSelected(null); setTimerStart(null);
-        fetchQueueOnly().catch(() => {});
+        setSelected(null);
+        fetchQueue();
       } else toast.error('Failed to skip');
     } catch { toast.error('Network error'); }
     setIsSkipping(false);
@@ -266,11 +210,13 @@ export default function DoctorDashboard() {
       });
       if (res.ok) {
         toast.success('Consultation saved!');
-        setSelected(null); setTimerStart(null);
+        setSelected(null);
         setDiagnosis(''); setMedicines([newRow()]); setNotes('');
-        fetchQueueOnly().catch(() => {});
-        fetchHistoryOnly().catch(() => {});
-      } else toast.error('Failed to save');
+        fetchQueue();
+      } else {
+        const data = await res.json().catch(() => ({}));
+        toast.error(data.error || 'Failed to save');
+      }
     } catch { toast.error('Network error'); }
     setIsSubmitting(false);
   };
@@ -284,6 +230,12 @@ export default function DoctorDashboard() {
   /* misc -------------------------------------------------------------------- */
   const formatTimer = (s: number) =>
     `${Math.floor(s / 60).toString().padStart(2, '0')}:${(s % 60).toString().padStart(2, '0')}`;
+  const parsedCalledAtMs =
+    selected?.status === 'in-progress' && selected.calledAt
+      ? new Date(selected.calledAt).getTime()
+      : NaN;
+  const timerStartMs = Number.isFinite(parsedCalledAtMs) ? parsedCalledAtMs : null;
+  const elapsed = timerStartMs ? Math.max(0, Math.floor((nowMs - timerStartMs) / 1000)) : 0;
 
   const getPatientHistory = (t: Token) => {
     const bookedByIdStr = typeof t.bookedById === 'object' && t.bookedById
@@ -306,7 +258,7 @@ export default function DoctorDashboard() {
 
   /* ─── Render ─────────────────────────────────────────────────────────────── */
   return (
-    <DashboardLayout title={`Dr. ${user?.name}`} subtitle="Your OPD Queue" requiredRole="doctor">
+    <DashboardLayout title={user?.name || 'Doctor'} subtitle="Your OPD Queue" requiredRole="doctor">
       <div style={{ display: 'grid', gridTemplateColumns: '320px 1fr', gap: 20, height: 'calc(100vh - 120px)' }}>
 
         {/* ── Queue Sidebar ── */}

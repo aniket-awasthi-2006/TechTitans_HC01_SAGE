@@ -3,7 +3,7 @@ import mongoose, { Schema, Document, Model } from 'mongoose';
 export interface IConsultation extends Document {
   tokenId: mongoose.Types.ObjectId;
   patientId?: mongoose.Types.ObjectId;   // the patient's own user ID (only for self-bookings)
-  bookedById: mongoose.Types.ObjectId;   // who booked the token — always set (for family too)
+  bookedById?: mongoose.Types.ObjectId;  // account that booked the token (can be empty for walk-ins)
   doctorId: mongoose.Types.ObjectId;
   patientName: string;
   doctorName: string;
@@ -21,7 +21,7 @@ const ConsultationSchema = new Schema<IConsultation>(
   {
     tokenId:      { type: Schema.Types.ObjectId, ref: 'Token', required: true },
     patientId:    { type: Schema.Types.ObjectId, ref: 'User' },
-    bookedById:   { type: Schema.Types.ObjectId, ref: 'User', required: true },
+    bookedById:   { type: Schema.Types.ObjectId, ref: 'User' },
     doctorId:     { type: Schema.Types.ObjectId, ref: 'User', required: true },
     patientName:  { type: String, required: true },
     doctorName:   { type: String, required: true },
@@ -36,7 +36,7 @@ const ConsultationSchema = new Schema<IConsultation>(
   { timestamps: true }
 );
 
-// Index for patient lookup — by bookedById covers both self and family
+// Index for patient lookup when booking is linked to a registered account
 ConsultationSchema.index({ bookedById: 1, date: -1 });
 ConsultationSchema.index({ doctorId: 1, date: -1 });
 

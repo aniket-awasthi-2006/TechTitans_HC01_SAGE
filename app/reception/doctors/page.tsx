@@ -3,8 +3,8 @@
 import { useState, useEffect, useCallback } from 'react';
 import DashboardLayout from '@/components/layout/DashboardLayout';
 import { useAuth } from '@/components/providers/AuthProvider';
-import { useSocket } from '@/components/providers/SocketProvider';
 import toast from 'react-hot-toast';
+import Link from 'next/link';
 
 interface Doctor {
   _id: string;
@@ -23,7 +23,6 @@ interface QueueStats {
 
 export default function ReceptionDoctorsPage() {
   const { token } = useAuth();
-  const { socket } = useSocket();
   const [doctors, setDoctors] = useState<Doctor[]>([]);
   const [stats, setStats] = useState<Record<string, QueueStats>>({});
   const [isLoading, setIsLoading] = useState(true);
@@ -64,23 +63,6 @@ export default function ReceptionDoctorsPage() {
   }, [token]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
-
-  useEffect(() => {
-    if (!socket) return;
-    const refresh = () => {
-      fetchData();
-    };
-    socket.on('token_created', refresh);
-    socket.on('token_updated', refresh);
-    socket.on('queue_updated', refresh);
-    socket.on('doctor_availability_changed', refresh);
-    return () => {
-      socket.off('token_created', refresh);
-      socket.off('token_updated', refresh);
-      socket.off('queue_updated', refresh);
-      socket.off('doctor_availability_changed', refresh);
-    };
-  }, [socket, fetchData]);
 
   const filtered = doctors.filter(d =>
     d.name.toLowerCase().includes(search.toLowerCase()) ||
@@ -170,11 +152,19 @@ export default function ReceptionDoctorsPage() {
                       {doc.name.charAt(0)}
                     </div>
                     <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontSize: 16, fontWeight: 700, color: '#F9FAFB', marginBottom: 2 }}>Dr. {doc.name}</div>
+                      <div style={{ fontSize: 16, fontWeight: 700, color: '#F9FAFB', marginBottom: 2 }}>{doc.name}</div>
                       <div style={{ fontSize: 13, color: accentColor, fontWeight: 600 }}>
                         {doc.specialization || 'General'}
                       </div>
                       <div style={{ fontSize: 11, color: '#4B5563', marginTop: 1 }}>{doc.email}</div>
+                      <Link
+                        href={`/display?doctorId=${doc._id}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        style={{ fontSize: 11, color: '#A5B4FC', marginTop: 6, textDecoration: 'none', display: 'inline-block' }}
+                      >
+                        Open Display Board
+                      </Link>
                     </div>
                     {/* Status pill */}
                     <div style={{
